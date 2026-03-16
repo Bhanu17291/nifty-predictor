@@ -1,0 +1,26 @@
+[
+  {
+    "date": "15 Mar 2026",
+    "prediction": "DOWN \ud83d\udd34",
+    "pred_int": 0,
+    "confidence": 58.1,
+    "up_prob": 41.9,
+    "regime": "BEAR",
+    "tier": "MODERATE",
+    "actual": "Skipped",
+    "correct": null,
+    "timestamp": "2026-03-16 04:15"
+  },
+  {
+    "date": "16 Mar 2026",
+    "prediction": "DOWN \ud83d\udd34",
+    "pred_int": 0,
+    "confidence": 58.8,
+    "up_prob": 41.2,
+    "regime": "BEAR",
+    "tier": "MODERATE",
+    "actual": "UP",
+    "correct": false,
+    "timestamp": "2026-03-16 14:41"
+  }
+]

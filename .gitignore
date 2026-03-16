@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+env/
+
+# Data files (too large for GitHub)
+data/master_raw.csv
+data/closes_v2.csv
+
+# Keep these data files (needed for app)
+!data/features.csv
+!data/features_v2.csv
+!data/train.csv
+!data/test.csv
+!data/train_v2.csv
+!data/test_v2.csv
+!data/master_clean.csv
+
+# Models (large binary files - regenerate on deploy)
+# Comment these out if models are small enough
+# models/*.pkl
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
