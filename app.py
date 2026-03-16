@@ -822,36 +822,58 @@ elif "⚙️" in page:
     st.divider()
     st.markdown('<p class="sec-label">One-Click Retrain</p>', unsafe_allow_html=True)
     st.markdown('<p class="sec-title">Retrain All Models</p>', unsafe_allow_html=True)
-    st.warning("⚠️ Retraining fetches fresh data and rebuilds all models. Takes 5–10 minutes.")
 
-    if st.button("🔄 Start Full Retrain Pipeline", type="primary"):
-        progress = st.progress(0)
-        status   = st.empty()
-        steps = [
-            ("Fetching fresh market data...",      "python data_fetch.py",       20),
-            ("Preprocessing data...",              "python data_preprocess.py",  40),
-            ("Building V2 features...",            "python features_v2.py",      60),
-            ("Training ensemble models...",        "python ensemble_model.py",   80),
-            ("Running regime detection...",        "python regime_detector.py",  90),
-            ("Building SHAP explanations...",      "python explainer.py",        100),
-        ]
-        success = True
-        for msg, cmd, pct in steps:
-            status.info(f"⏳ {msg}")
-            try:
-                result = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=300)
-                if result.returncode != 0:
-                    st.error(f"Error in: {cmd}\n{result.stderr[:300]}")
-                    success = False; break
-            except Exception as e:
-                st.error(f"Failed: {e}"); success = False; break
-            progress.progress(pct)
+    # Detect if running on Streamlit Cloud
+    is_cloud = os.environ.get("STREAMLIT_SHARING_MODE") or not os.path.exists("data_fetch.py")
 
-        if success:
-            status.success("✅ Retraining complete! Refresh the page to use the new model.")
-            st.cache_resource.clear(); st.cache_data.clear()
-        else:
-            status.error("❌ Retraining failed. Check errors above.")
+    if is_cloud:
+        st.info("""
+        ☁️ **Running on Streamlit Cloud**
+
+        Retraining requires a local Python environment. To retrain the model:
+
+        1. Clone the repo to your local machine
+        2. Run these commands in order:
+        ```
+        python data_fetch.py
+        python features_v2.py
+        python ensemble_model.py
+        python regime_detector.py
+        python explainer.py
+        ```
+        3. Push the new model files to GitHub
+        4. Streamlit Cloud will auto-redeploy
+        """)
+    else:
+        st.warning("⚠️ Retraining fetches fresh data and rebuilds all models. Takes 5–10 minutes.")
+        if st.button("🔄 Start Full Retrain Pipeline", type="primary"):
+            progress = st.progress(0)
+            status   = st.empty()
+            steps = [
+                ("Fetching fresh market data...",      "python data_fetch.py",       20),
+                ("Preprocessing data...",              "python data_preprocess.py",  40),
+                ("Building V2 features...",            "python features_v2.py",      60),
+                ("Training ensemble models...",        "python ensemble_model.py",   80),
+                ("Running regime detection...",        "python regime_detector.py",  90),
+                ("Building SHAP explanations...",      "python explainer.py",        100),
+            ]
+            success = True
+            for msg, cmd, pct in steps:
+                status.info(f"⏳ {msg}")
+                try:
+                    result = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=300)
+                    if result.returncode != 0:
+                        st.error(f"Error in: {cmd}\n{result.stderr[:300]}")
+                        success = False; break
+                except Exception as e:
+                    st.error(f"Failed: {e}"); success = False; break
+                progress.progress(pct)
+
+            if success:
+                status.success("✅ Retraining complete! Refresh the page to use the new model.")
+                st.cache_resource.clear(); st.cache_data.clear()
+            else:
+                status.error("❌ Retraining failed. Check errors above.")
 
     st.divider()
     st.markdown('<p class="sec-label">Recent Predictions</p>', unsafe_allow_html=True)
