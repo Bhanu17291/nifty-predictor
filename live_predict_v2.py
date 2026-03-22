@@ -1,10 +1,17 @@
 """
-LIVE PREDICT V2
-- Fetches today's live data (all 7 markets)
-- Detects market regime
-- Runs ensemble prediction with regime-adjusted weights
-- Confidence tier filter
-- SHAP explanation
+LIVE PREDICT V2 — Fixed
+=========================
+Changes from original:
+
+  [Step 8a] Missing feature fallback fixed
+            WAS: X_live[col] = 0.0  ← zero is NOT neutral for return features
+            NOW: X_live[col] = training_medians[col]  ← statistically neutral
+
+  [Step 8b] Loads optimised weights from optimal_weights.pkl (Step 7)
+            Falls back to regime_detector weights if file not found
+
+  [Step 8c] Loads optimised threshold from optimal_weights.pkl (Step 7)
+            Falls back to 0.50 if file not found
 """
 
 import yfinance as yf
@@ -21,25 +28,26 @@ TICKERS = {
     "sp500"      : "^GSPC",
     "nasdaq"     : "^IXIC",
     "nifty"      : "^NSEI",
-    "gift_nifty" : "^NSEI",
+    # Step 1 fix carried through — NIFTYBEES.NS not ^NSEI
+    "gift_nifty" : "NIFTYBEES.NS",
     "vix_india"  : "^INDIAVIX",
     "usdinr"     : "INR=X",
     "crude"      : "BZ=F",
 }
 
-# Confidence tiers
+
 def confidence_tier(conf: float) -> dict:
     if conf >= 65:
-        return {"tier": "STRONG",  "label": "Strong Signal",  "emoji": "🔥"}
+        return {"tier": "STRONG",   "label": "Strong Signal",   "emoji": "🔥"}
     elif conf >= 57:
-        return {"tier": "MODERATE","label": "Moderate Signal","emoji": "✅"}
+        return {"tier": "MODERATE", "label": "Moderate Signal", "emoji": "✅"}
     elif conf >= 52:
-        return {"tier": "WEAK",    "label": "Weak Signal",    "emoji": "⚠️"}
+        return {"tier": "WEAK",     "label": "Weak Signal",     "emoji": "⚠️"}
     else:
-        return {"tier": "UNCLEAR", "label": "No Clear Signal","emoji": "⚪"}
+        return {"tier": "UNCLEAR",  "label": "No Clear Signal", "emoji": "⚪"}
 
 
-def load_models():
+def load_models() -> dict:
     models = {}
     for name in ["xgb", "lgbm", "rf"]:
         path = os.path.join(MODEL_DIR, f"{name}_model_v2.pkl")
@@ -49,7 +57,67 @@ def load_models():
     return models
 
 
-def fetch_live(days_back: int = 60) -> pd.DataFrame:
+def load_optimal_weights() -> dict:
+    """
+    STEP 8b — Load optimised weights and threshold from Step 7.
+    Falls back gracefully if optimise_weights.py hasn't been run yet.
+    """
+    path = os.path.join(MODEL_DIR, "optimal_weights.pkl")
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+        return data
+    # Fallback to default weights
+    return {
+        "global_weights" : {"xgb": 0.40, "lgbm": 0.40, "rf": 0.20},
+        "regime_weights" : {
+            "BULL": {"xgb": 0.45, "lgbm": 0.40, "rf": 0.15},
+            "BEAR": {"xgb": 0.30, "lgbm": 0.35, "rf": 0.35},
+            "FLAT": {"xgb": 0.40, "lgbm": 0.40, "rf": 0.20},
+        },
+        "best_threshold" : 0.50,
+    }
+
+
+# ── STEP 8a — Load training medians ──────────────────────────────────────────
+def load_training_medians(feature_cols: list) -> pd.Series:
+    """
+    STEP 8a FIX — Load median of each feature from training data.
+
+    When a live feature is missing (API down, market closed, new column),
+    we fill with the training median instead of 0.0.
+
+    Why median not mean:
+      Return distributions are fat-tailed. Mean is pulled by outliers.
+      Median is the true "average day" for financial return features.
+
+    Saves medians to data/training_medians.pkl on first run,
+    reloads from cache on subsequent runs.
+    """
+    cache_path = os.path.join(DATA_DIR, "training_medians.pkl")
+
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            medians = pickle.load(f)
+        return medians
+
+    # Compute from training data if cache doesn't exist
+    train_path = os.path.join(DATA_DIR, "train_v2.csv")
+    if os.path.exists(train_path):
+        train_df = pd.read_csv(train_path, index_col=0, parse_dates=True)
+        feat     = [c for c in feature_cols if c in train_df.columns]
+        medians  = train_df[feat].median()
+        with open(cache_path, "wb") as f:
+            pickle.dump(medians, f)
+        print(f"  💾 Training medians cached → {cache_path}")
+        return medians
+
+    # Last resort: return zeros (same as before, but now explicit)
+    print("  ⚠️  Could not load training data for medians — using 0.0 fallback")
+    return pd.Series({col: 0.0 for col in feature_cols})
+
+
+def fetch_live(days_back: int = 120) -> pd.DataFrame:
     end   = datetime.today()
     start = end - timedelta(days=days_back)
     closes = {}
@@ -59,11 +127,12 @@ def fetch_live(days_back: int = 60) -> pd.DataFrame:
                              start=start.strftime("%Y-%m-%d"),
                              end=end.strftime("%Y-%m-%d"),
                              progress=False)
-            if df.empty: continue
+            if df.empty:
+                continue
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             closes[name] = df["Close"]
-        except:
+        except Exception:
             pass
     df = pd.DataFrame(closes)
     df.index = pd.to_datetime(df.index)
@@ -71,107 +140,27 @@ def fetch_live(days_back: int = 60) -> pd.DataFrame:
 
 
 def build_live_features(closes: pd.DataFrame) -> pd.DataFrame:
-    """Rebuild all features from closes — must match features_v2.py exactly."""
-    df = pd.DataFrame(index=closes.index)
-
-    for col in closes.columns:
-        df[f"{col}_ret"] = closes[col].pct_change() * 100
-
-    for market in ["sp500", "nasdaq", "nifty", "gift_nifty", "crude", "usdinr"]:
-        r = f"{market}_ret"
-        if r not in df: continue
-        df[f"{market}_mom_3d"]  = df[r].rolling(3).sum()
-        df[f"{market}_mom_5d"]  = df[r].rolling(5).sum()
-        df[f"{market}_mom_10d"] = df[r].rolling(10).sum()
-
-    for market in ["sp500", "nasdaq", "nifty", "gift_nifty", "crude"]:
-        r = f"{market}_ret"
-        if r not in df: continue
-        df[f"{market}_vol_5d"]  = df[r].rolling(5).std()
-        df[f"{market}_vol_10d"] = df[r].rolling(10).std()
-
-    if "sp500_ret" in df and "nasdaq_ret" in df:
-        df["sp500_nasdaq_div"] = df["sp500_ret"] - df["nasdaq_ret"]
-    if "sp500_ret" in df and "nasdaq_ret" in df and "nifty_ret" in df:
-        df["us_avg_ret"]   = (df["sp500_ret"] + df["nasdaq_ret"]) / 2
-        df["us_nifty_div"] = df["us_avg_ret"] - df["nifty_ret"]
-    if "gift_nifty_ret" in df and "nifty_ret" in df:
-        df["gift_nifty_basis"] = df["gift_nifty_ret"] - df["nifty_ret"]
-
-    for market in ["sp500", "nasdaq", "nifty", "gift_nifty", "crude", "usdinr"]:
-        r = f"{market}_ret"
-        if r not in df: continue
-        df[f"{market}_lag1"] = df[r].shift(1)
-        df[f"{market}_lag2"] = df[r].shift(2)
-
-    for market in ["sp500", "nasdaq", "nifty", "crude"]:
-        r = f"{market}_ret"
-        if r not in df: continue
-        df[f"{market}_up_3d"] = (df[r].rolling(3).sum() > 0).astype(int)
-        df[f"{market}_up_5d"] = (df[r].rolling(5).sum() > 0).astype(int)
-
-    if "vix_india_ret" in df:
-        df["vix_level"]    = closes["vix_india"].ffill()
-        df["vix_high"]     = (df["vix_level"] > 20).astype(int)
-        df["vix_extreme"]  = (df["vix_level"] > 30).astype(int)
-        df["vix_mom_3d"]   = df["vix_india_ret"].rolling(3).sum()
-        df["vix_rising"]   = (df["vix_india_ret"].rolling(3).sum() > 0).astype(int)
-
-    if "usdinr_ret" in df:
-        df["usdinr_level"]    = closes["usdinr"].ffill()
-        df["rupee_weak"]      = (df["usdinr_ret"] > 0).astype(int)
-        df["rupee_very_weak"] = (df["usdinr_ret"] > 0.5).astype(int)
-
-    if "crude_ret" in df:
-        df["crude_spike"] = (df["crude_ret"].abs() > 2).astype(int)
-        df["crude_up"]    = (df["crude_ret"] > 0).astype(int)
-
-    df["day_of_week"]    = df.index.dayofweek
-    df["month"]          = df.index.month
-    df["is_monday"]      = (df.index.dayofweek == 0).astype(int)
-    df["is_friday"]      = (df.index.dayofweek == 4).astype(int)
-    df["is_month_end"]   = (df.index.day >= 25).astype(int)
-    df["is_month_start"] = (df.index.day <= 5).astype(int)
-    df["quarter"]        = df.index.quarter
-
-    if "sp500_ret" in df and "nifty_ret" in df:
-        df["sp500_nifty_corr_20d"] = df["sp500_ret"].rolling(20).corr(df["nifty_ret"])
-    if "nasdaq_ret" in df and "nifty_ret" in df:
-        df["nasdaq_nifty_corr_20d"] = df["nasdaq_ret"].rolling(20).corr(df["nifty_ret"])
-
-    if "nifty" in closes.columns:
-        nifty_price = closes["nifty"].ffill()
-        ma20 = nifty_price.rolling(20).mean()
-        ma50 = nifty_price.rolling(50).mean()
-        df["nifty_dist_ma20"]  = ((nifty_price - ma20) / ma20 * 100)
-        df["nifty_dist_ma50"]  = ((nifty_price - ma50) / ma50 * 100)
-        df["nifty_above_ma20"] = (nifty_price > ma20).astype(int)
-        df["nifty_above_ma50"] = (nifty_price > ma50).astype(int)
-
-    if "sp500" in closes.columns:
-        sp_price = closes["sp500"].ffill()
-        ma50_sp  = sp_price.rolling(50).mean()
-        df["sp500_dist_ma50"]  = ((sp_price - ma50_sp) / ma50_sp * 100)
-        df["sp500_above_ma50"] = (sp_price > ma50_sp).astype(int)
-
-    if "sp500_mom_5d" in df and "nifty_mom_5d" in df:
-        df["cross_mom_diff"] = df["sp500_mom_5d"] - df["nifty_mom_5d"]
-
-    return df.dropna()
+    """Rebuild features — must match features_v2.py exactly including z-scores."""
+    from features_v2 import build_features
+    df = build_features(closes)
+    if df.empty:
+        df = build_features(closes.ffill())
+        df = df.ffill().dropna(how="all")
+    return df
 
 
 def predict_tomorrow_v2(verbose: bool = True) -> dict:
     if verbose:
         print("=" * 55)
-        print("  NIFTY PREDICTOR V2 — Live Prediction")
+        print("  NIFTY PREDICTOR V2 — Live Prediction (Fixed)")
         print("=" * 55 + "\n")
         print("  Fetching live market data...")
 
-    closes   = fetch_live(days_back=80)
+    closes   = fetch_live(days_back=120)
     features = build_live_features(closes)
 
     if features.empty:
-        raise ValueError("Not enough live data.")
+        raise ValueError("Not enough live data to build features.")
 
     models = load_models()
     if not models:
@@ -179,38 +168,69 @@ def predict_tomorrow_v2(verbose: bool = True) -> dict:
 
     # Load feature columns from training data
     train_path   = os.path.join(DATA_DIR, "features_v2.csv")
-    train_df     = pd.read_csv(train_path, index_col="Date", nrows=1)
+    train_df     = pd.read_csv(train_path, index_col=0, nrows=2)
     feature_cols = [c for c in train_df.columns if c != "target"]
 
-    # Get latest row & align columns
+    # Get latest row
     latest      = features.tail(1)
     latest_date = latest.index[0]
 
-    X_live = pd.DataFrame(index=latest.index, columns=feature_cols)
+    # ── STEP 8a FIX — Fill missing features with training medians ─────────────
+    # WAS: X_live[col] = 0.0  ← implied "flat market" for ALL missing features
+    # NOW: X_live[col] = training_medians[col]  ← statistically neutral value
+    medians = load_training_medians(feature_cols)
+    X_live  = pd.DataFrame(index=latest.index, columns=feature_cols, dtype=float)
+
+    missing_cols = []
     for col in feature_cols:
-        X_live[col] = latest[col].values if col in latest.columns else 0.0
+        if col in latest.columns and not latest[col].isna().all():
+            X_live[col] = float(latest[col].iloc[0])
+        else:
+            fill_val    = float(medians.get(col, 0.0))
+            X_live[col] = fill_val
+            missing_cols.append(col)
+
+    if missing_cols and verbose:
+        print(f"  ⚠️  {len(missing_cols)} features filled with training median "
+              f"(not 0.0): {missing_cols[:5]}{'...' if len(missing_cols)>5 else ''}")
+
     X_live = X_live.astype(float)
 
-    # Detect regime
-    from regime_detector import detect_regime
-    regime_info = detect_regime(closes.dropna(subset=["nifty"]))
-    weights     = regime_info["weights"]
+    # ── Load optimised weights and threshold (Step 7) ─────────────────────────
+    opt_data  = load_optimal_weights()
+    threshold = opt_data.get("best_threshold", 0.50)
 
-    # Ensemble predict with regime weights
-    p_xgb  = models["xgb"].predict_proba(X_live)[0][1]
-    p_lgbm = models["lgbm"].predict_proba(X_live)[0][1] if "lgbm" in models else p_xgb
-    p_rf   = models["rf"].predict_proba(X_live)[0][1]   if "rf"   in models else p_xgb
+    # Detect regime and use regime-specific weights
+    try:
+        from regime_detector import detect_regime
+        regime_info    = detect_regime(closes.dropna(subset=["nifty"]))
+        regime         = regime_info["regime"]
+        # STEP 8b — use optimised regime weights if available, else fall back
+        regime_weights = opt_data.get("regime_weights", {})
+        weights        = regime_weights.get(regime, opt_data["global_weights"])
+    except Exception:
+        regime_info = {"regime": "FLAT", "emoji": "🔵",
+                       "description": "Regime detection failed",
+                       "weights": opt_data["global_weights"]}
+        weights     = opt_data["global_weights"]
+        regime      = "FLAT"
 
-    up_prob = (p_xgb  * weights["xgb"] +
+    # Ensemble predict
+    p_xgb  = float(models["xgb"].predict_proba(X_live)[0][1])
+    p_lgbm = float(models["lgbm"].predict_proba(X_live)[0][1]) if "lgbm" in models else p_xgb
+    p_rf   = float(models["rf"].predict_proba(X_live)[0][1])   if "rf"   in models else p_xgb
+
+    up_prob = (p_xgb  * weights["xgb"]  +
                p_lgbm * weights["lgbm"] +
                p_rf   * weights["rf"]) * 100
 
     down_prob  = 100 - up_prob
-    pred_int   = 1 if up_prob >= 50 else 0
+
+    # STEP 8c — use optimised threshold, not hardcoded 0.50
+    pred_int   = 1 if (up_prob / 100) >= threshold else 0
     confidence = up_prob if pred_int == 1 else down_prob
     tier_info  = confidence_tier(confidence)
 
-    # Market snapshot
     def safe_ret(col):
         if col in closes.columns and len(closes[col].dropna()) >= 2:
             s = closes[col].dropna()
@@ -222,36 +242,42 @@ def predict_tomorrow_v2(verbose: bool = True) -> dict:
     try:
         from explainer import explain_prediction
         explanation = explain_prediction(X_live, models)
-    except:
+    except Exception:
         pass
 
     result = {
-        "prediction"  : "UP 🟢" if pred_int == 1 else "DOWN 🔴",
-        "pred_int"    : pred_int,
-        "up_prob"     : round(up_prob, 1),
-        "down_prob"   : round(down_prob, 1),
-        "confidence"  : round(confidence, 1),
-        "tier"        : tier_info["tier"],
-        "tier_label"  : tier_info["label"],
-        "tier_emoji"  : tier_info["emoji"],
-        "regime"      : regime_info["regime"],
-        "regime_emoji": regime_info["emoji"],
-        "regime_desc" : regime_info["description"],
-        "as_of_date"  : latest_date.strftime("%d %b %Y"),
-        "sp500_ret"   : round(safe_ret("sp500"), 2),
-        "nasdaq_ret"  : round(safe_ret("nasdaq"), 2),
-        "nifty_ret"   : round(safe_ret("nifty"), 2),
-        "crude_ret"   : round(safe_ret("crude"), 2),
-        "usdinr_ret"  : round(safe_ret("usdinr"), 2),
-        "vix"         : round(float(closes["vix_india"].dropna().iloc[-1]), 2)
-                        if "vix_india" in closes.columns else None,
-        "explanation" : explanation,
-        "weights_used": weights,
+        "prediction"   : "UP 🟢" if pred_int == 1 else "DOWN 🔴",
+        "pred_int"     : pred_int,
+        "up_prob"      : round(up_prob, 1),
+        "down_prob"    : round(down_prob, 1),
+        "confidence"   : round(confidence, 1),
+        "tier"         : tier_info["tier"],
+        "tier_label"   : tier_info["label"],
+        "tier_emoji"   : tier_info["emoji"],
+        "regime"       : regime_info["regime"],
+        "regime_emoji" : regime_info.get("emoji", "🔵"),
+        "regime_desc"  : regime_info.get("description", ""),
+        "as_of_date"   : latest_date.strftime("%d %b %Y"),
+        "sp500_ret"    : round(safe_ret("sp500"),  2),
+        "nasdaq_ret"   : round(safe_ret("nasdaq"), 2),
+        "nifty_ret"    : round(safe_ret("nifty"),  2),
+        "crude_ret"    : round(safe_ret("crude"),  2),
+        "usdinr_ret"   : round(safe_ret("usdinr"), 2),
+        "vix"          : round(float(closes["vix_india"].dropna().iloc[-1]), 2)
+                         if "vix_india" in closes.columns else None,
+        "explanation"  : explanation,
+        "weights_used" : weights,
+        "threshold_used": threshold,
+        "missing_features": len(missing_cols),
     }
 
     if verbose:
         print(f"\n  Data as of      : {result['as_of_date']}")
         print(f"  Regime          : {result['regime_emoji']} {result['regime']}")
+        print(f"  Weights used    : XGB={weights['xgb']:.3f} "
+              f"LGBM={weights['lgbm']:.3f} RF={weights['rf']:.3f}")
+        print(f"  Threshold used  : {threshold:.2f} (optimised)")
+        print(f"  Missing features: {len(missing_cols)} (filled with median)")
         print(f"  S&P500          : {result['sp500_ret']:+.2f}%")
         print(f"  Nasdaq          : {result['nasdaq_ret']:+.2f}%")
         print(f"  Nifty (prev)    : {result['nifty_ret']:+.2f}%")
