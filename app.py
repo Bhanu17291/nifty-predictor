@@ -590,7 +590,6 @@ st.markdown("""
 # PAGE: LIVE PREDICTION
 # ══════════════════════════════════════════════════════════════════════════════
 if "🏠" in page:
-    # ── Scorecard bar ────────────────────────────────────────────────────────
     score = get_scorecard(30)
     if score["total"] > 0:
         sc1, sc2, sc3 = st.columns(3)
@@ -600,39 +599,66 @@ if "🏠" in page:
 
     st.markdown("""
     <style>
-    .dashboard-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1rem;}
-    .dash-card{background:rgba(15,23,42,.85);border:1px solid rgba(99,179,237,.2);border-radius:16px;padding:1.4rem 1.6rem;}
-    .dash-card-wide{background:rgba(15,23,42,.85);border:1px solid rgba(99,179,237,.2);border-radius:16px;padding:1.4rem 1.6rem;grid-column:span 2;}
-    .card-label{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#60a5fa;text-transform:uppercase;letter-spacing:.15em;margin-bottom:.5rem;}
-    .signal-big{font-family:'Playfair Display',serif;font-size:2.8rem;font-weight:800;letter-spacing:-.03em;margin:0;}
-    .conf-num{font-family:'Playfair Display',serif;font-size:2.4rem;font-weight:700;margin:0;}
-    .ticker-mini{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.4rem;}
-    .tmini{background:linear-gradient(135deg,rgba(30,41,59,.9),rgba(15,23,42,.9));border:1px solid rgba(99,179,237,.25);border-radius:10px;padding:.6rem .9rem;text-align:center;flex:1;min-width:80px;box-shadow:0 2px 8px rgba(0,0,0,.3);}
-    .tmini-label{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:#60a5fa;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.3rem;font-weight:600;}
-    .tmini-val{font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:800;}
-    .target-val{font-family:'Playfair Display',serif;font-size:2rem;font-weight:700;color:#60a5fa;margin:0;}
-    .target-range{font-family:'IBM Plex Mono',monospace;font-size:.82rem;color:#64748b;margin:.3rem 0 0;}
-    .range-bar{display:flex;align-items:center;gap:.5rem;margin:.8rem 0 .3rem;}
-    .range-low{font-family:'IBM Plex Mono',monospace;font-size:.8rem;color:#ef4444;font-weight:700;}
-    .range-high{font-family:'IBM Plex Mono',monospace;font-size:.8rem;color:#22c55e;font-weight:700;}
-    .range-line{flex:1;height:4px;background:linear-gradient(90deg,#ef4444,#3b82f6,#22c55e);border-radius:2px;}
+    .dash-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.9rem;margin:1rem 0;}
+    .dc{background:rgba(15,23,42,.9);border:1px solid rgba(99,179,237,.18);
+        border-radius:16px;padding:1.3rem 1.5rem;height:100%;box-sizing:border-box;}
+    .dc-wide{background:rgba(15,23,42,.9);border:1px solid rgba(99,179,237,.18);
+             border-radius:16px;padding:1.3rem 1.5rem;grid-column:span 2;}
+    .cl{font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:#60a5fa;
+        text-transform:uppercase;letter-spacing:.15em;margin-bottom:.5rem;}
+    .sig{font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:800;
+         letter-spacing:-.03em;margin:0 0 .2rem;}
+    .sig-sub{font-family:'IBM Plex Sans',sans-serif;font-size:.85rem;color:#64748b;margin:0;}
+    .cn{font-family:'Playfair Display',serif;font-size:2.4rem;font-weight:700;margin:0;}
+    .pbar-wrap{margin:.5rem 0 .25rem;background:rgba(30,41,59,.8);border-radius:6px;
+               height:7px;overflow:hidden;}
+    .pbar-fill{height:100%;border-radius:6px;
+               background:linear-gradient(90deg,#22c55e,#16a34a);}
+    .pbar-info{display:flex;justify-content:space-between;
+               font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:#64748b;}
+    .tv{font-family:'Playfair Display',serif;font-size:1.9rem;font-weight:700;
+        color:#60a5fa;margin:0;}
+    .tr{font-family:'IBM Plex Mono',monospace;font-size:.78rem;color:#64748b;margin:.2rem 0 0;}
+    .rbar{display:flex;align-items:center;gap:.4rem;margin:.6rem 0 .3rem;}
+    .rlow{font-family:'IBM Plex Mono',monospace;font-size:.75rem;
+          color:#ef4444;font-weight:700;}
+    .rhigh{font-family:'IBM Plex Mono',monospace;font-size:.75rem;
+           color:#22c55e;font-weight:700;}
+    .rline{flex:1;height:3px;
+           background:linear-gradient(90deg,#ef4444,#3b82f6,#22c55e);border-radius:2px;}
+    .tk{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.3rem;}
+    .tm{background:linear-gradient(135deg,rgba(30,41,59,.95),rgba(15,23,42,.95));
+        border:1px solid rgba(99,179,237,.22);border-radius:10px;
+        padding:.5rem .7rem;text-align:center;flex:1;min-width:72px;
+        box-shadow:0 2px 8px rgba(0,0,0,.3);}
+    .tml{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:#60a5fa;
+         text-transform:uppercase;letter-spacing:.08em;margin-bottom:.2rem;font-weight:600;}
+    .tmv{font-family:'Playfair Display',serif;font-size:1.15rem;font-weight:800;}
+    .rr{display:flex;align-items:flex-start;gap:.5rem;padding:.35rem 0;
+        border-bottom:1px solid rgba(99,179,237,.07);}
+    .rr:last-child{border-bottom:none;}
+    .rb{font-family:'IBM Plex Mono',monospace;font-size:.78rem;
+        padding:.15rem .45rem;border-radius:5px;font-weight:700;flex-shrink:0;}
+    .rbu{background:rgba(20,83,45,.5);color:#22c55e;}
+    .rbd{background:rgba(127,29,29,.5);color:#ef4444;}
+    .rt{font-family:'IBM Plex Sans',sans-serif;font-size:.85rem;
+        color:#cbd5e1;line-height:1.5;}
+    .pdf-area{display:flex;flex-direction:column;align-items:center;
+              justify-content:center;height:100%;gap:.8rem;}
+    .pdf-icon{font-size:2.5rem;margin:0;}
+    .pdf-text{font-family:'IBM Plex Sans',sans-serif;font-size:.9rem;
+              color:#64748b;text-align:center;margin:0;}
     </style>
     """, unsafe_allow_html=True)
 
-    # ── Generate button ───────────────────────────────────────────────────────
+    # ── Generate button ───────────────────────────────────────────────────
     col_btn, _ = st.columns([1, 3])
     with col_btn:
         st.button("⚡ Generate Prediction", type="primary",
                   use_container_width=True, key="predict_btn")
 
-    # ── Tabs just below generate button ──────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Options", "📈 FII/DII", "🎯 SHAP Details",
-        "🔊 Voice", "📰 Sentiment", "📋 Watchlist"
-    ])
-
     if st.session_state.get("predict_btn"):
-        with st.spinner("Fetching live data & running ensemble..."):
+        with st.spinner("Running ensemble model..."):
             try:
                 if USE_V2:
                     from live_predict_v2 import predict_tomorrow_v2
@@ -643,9 +669,7 @@ if "🏠" in page:
 
                 st.session_state["last_result"] = r
                 add_to_history(r)
-                commentary  = generate_commentary(r)
-                st.session_state["commentary"] = commentary
-
+                commentary      = generate_commentary(r)
                 pred_direction  = "UP" if r["pred_int"] == 1 else "DOWN"
                 pred_confidence = r["confidence"] / 100
                 log_prediction(pred_direction, pred_confidence)
@@ -654,77 +678,92 @@ if "🏠" in page:
                 signal      = compute_signal(confidence=pred_confidence, vix=current_vix)
                 mag         = r.get("magnitude", {})
 
-                def vc(v): return "up-val" if v > 0 else "down-val" if v < 0 else "neu-val"
-                def ar(v): return "▲" if v > 0 else "▼" if v < 0 else "—"
+                def vc(v): return "up-val" if v>0 else "down-val" if v<0 else "neu-val"
+                def ar(v): return "▲" if v>0 else "▼" if v<0 else "—"
 
                 is_up      = r["pred_int"] == 1
                 sig_color  = "#22c55e" if is_up else "#ef4444"
                 sig_label  = "🟢 Bullish Open" if is_up else "🔴 Bearish Open"
                 sig_sub    = "Nifty expected to open HIGHER" if is_up else "Nifty expected to open LOWER"
-                conf_color = "#22c55e" if pred_confidence >= .65 else "#f97316" if pred_confidence >= .55 else "#ef4444"
+                conf_color = "#22c55e" if pred_confidence>=.65 else "#f97316" if pred_confidence>=.55 else "#ef4444"
 
-                # ── Target price ──────────────────────────────────────────────
+                # target price
                 if mag.get("available"):
                     target_str = f"₹{mag['pred_price']:,.0f}"
-                    range_str  = f"₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}"
                     ret_str    = f"{mag['predicted_ret']:+.2f}%"
-                    ret_color  = "#22c55e" if mag["predicted_ret"] > 0 else "#ef4444"
+                    ret_color  = "#22c55e" if mag["predicted_ret"]>0 else "#ef4444"
                     low_str    = f"₹{mag['low_price']:,.0f}"
                     high_str   = f"₹{mag['high_price']:,.0f}"
                 else:
-                    # Fallback: estimate range from confidence
                     try:
                         import yfinance as _yf
-                        _np = float(_yf.download("^NSEI", period="2d", interval="1d",
-                                                  progress=False)["Close"].iloc[-1])
+                        _np        = float(_yf.download("^NSEI", period="2d",
+                                           interval="1d", progress=False)["Close"].iloc[-1])
                         move_pct   = (pred_confidence - 0.5) * 0.04
                         pred_price = _np * (1 + move_pct)
                         low_price  = _np * (1 + move_pct - 0.008)
                         high_price = _np * (1 + move_pct + 0.008)
                         target_str = f"₹{pred_price:,.0f}"
-                        range_str  = f"₹{low_price:,.0f} – ₹{high_price:,.0f}"
                         ret_str    = f"{move_pct*100:+.2f}%"
-                        ret_color  = "#22c55e" if move_pct > 0 else "#ef4444"
+                        ret_color  = "#22c55e" if move_pct>0 else "#ef4444"
                         low_str    = f"₹{low_price:,.0f}"
                         high_str   = f"₹{high_price:,.0f}"
                     except Exception:
-                        target_str = "Calculating..."
-                        range_str  = "Market data loading"
+                        target_str = "N/A"
                         ret_str    = "—"
                         ret_color  = "#64748b"
                         low_str    = "—"
                         high_str   = "—"
 
-                vix_html = f'<div class="tmini"><div class="tmini-label">VIX</div><div class="tmini-val neu-val">{r["vix"]}</div></div>' if r.get("vix") else ""
+                # SHAP reasons
+                shap_top = []
+                if r.get("explanation", {}).get("available"):
+                    for reason in r["explanation"].get("reasons", [])[:3]:
+                        if isinstance(reason, dict):
+                            shap_top.append((
+                                reason.get("feature",""),
+                                reason.get("shap", 0)
+                            ))
+                live_data = {
+                    "SP500_return"     : r["sp500_ret"],
+                    "Nasdaq_return"    : r["nasdaq_ret"],
+                    "India_VIX"        : current_vix,
+                    "USDINR_return"    : r.get("usdinr_ret", 0),
+                    "Crude_return"     : r.get("crude_ret", 0),
+                    "GIFT_Nifty_return": r["nifty_ret"],
+                }
+                reasons_text = generate_reasoning(
+                    shap_top, live_data, pred_direction
+                )
+                if not reasons_text:
+                    reasons_text = [
+                        f"S&P 500 closed {r['sp500_ret']:+.2f}% overnight.",
+                        f"Nasdaq closed {r['nasdaq_ret']:+.2f}% overnight.",
+                        f"India VIX is at {current_vix:.1f}.",
+                    ]
 
-                # ── MAIN DASHBOARD GRID ───────────────────────────────────────
+                vix_html = f'''<div class="tm"><div class="tml">VIX</div>
+                    <div class="tmv neu-val">{r["vix"]}</div></div>''' if r.get("vix") else ""
+
+                reasons_html = ""
+                for rt in reasons_text[:3]:
+                    reasons_html += f'''
+                    <div class="rr">
+                        <span class="rb {'rbu' if is_up else 'rbd'}">
+                            {'▲' if is_up else '▼'}
+                        </span>
+                        <span class="rt">{rt}</span>
+                    </div>'''
+
+                # ── ROW 1: Signal | Confidence | Target ──────────────────
                 st.markdown(f"""
-                <div class="dashboard-grid">
+                <div class="dash-grid">
 
-                  <div class="dash-card" style="border-top:3px solid {sig_color};">
-                    <div class="card-label">Signal</div>
-                    <p class="signal-big" style="color:{sig_color};">{sig_label}</p>
-                    <p style="font-family:'IBM Plex Sans',sans-serif;font-size:.88rem;
-                               color:#64748b;margin:.3rem 0 0;">{sig_sub}</p>
-                    <p style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;
-                               color:#475569;margin:.6rem 0 0;">📅 {r['as_of_date']}</p>
-                  </div>
-
-                  <div class="dash-card" style="border-top:3px solid {conf_color};">
-                    <div class="card-label">Confidence</div>
-                    <p class="conf-num" style="color:{conf_color};">{r['confidence']:.1f}%</p>
-                    <div style="margin:.6rem 0 .3rem;background:rgba(30,41,59,.8);
-                                border-radius:6px;height:8px;overflow:hidden;">
-                      <div style="width:{r['up_prob']}%;height:100%;
-                                  background:linear-gradient(90deg,#22c55e,#16a34a);
-                                  border-radius:6px;"></div>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;
-                                font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#64748b;">
-                      <span>🟢 UP {r['up_prob']}%</span>
-                      <span>🔴 DN {r['down_prob']}%</span>
-                    </div>
-                    <div style="margin-top:.6rem;">
+                  <div class="dc" style="border-top:3px solid {sig_color};">
+                    <div class="cl">Signal · {r['as_of_date']}</div>
+                    <p class="sig" style="color:{sig_color};">{sig_label}</p>
+                    <p class="sig-sub">{sig_sub}</p>
+                    <div style="margin-top:.8rem;">
                       <span class="regime-badge {'regime-bull' if r.get('regime')=='BULL' else 'regime-bear' if r.get('regime')=='BEAR' else 'regime-flat'}">
                         {r.get('regime_emoji','')} {r.get('regime','N/A')}
                       </span>
@@ -735,53 +774,103 @@ if "🏠" in page:
                     </div>
                   </div>
 
-                  <div class="dash-card" style="border-top:3px solid #3b82f6;">
-                    <div class="card-label">Target Open Price</div>
-                    <p class="target-val">{target_str}
-                      <span style="font-size:1rem;color:{ret_color};font-weight:700;"> {ret_str}</span>
-                    </p>
-                    <div class="range-bar">
-                      <span class="range-low">▼ {low_str}</span>
-                      <div class="range-line"></div>
-                      <span class="range-high">▲ {high_str}</span>
+                  <div class="dc" style="border-top:3px solid {conf_color};">
+                    <div class="cl">Confidence</div>
+                    <p class="cn" style="color:{conf_color};">{r['confidence']:.1f}%</p>
+                    <div class="pbar-wrap">
+                      <div class="pbar-fill" style="width:{r['up_prob']}%;"></div>
                     </div>
-                    <div style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:#475569;">
-                      Signal Score: <strong style="color:#e2e8f0;">{signal['score']:.0%}</strong>
-                      &nbsp;·&nbsp; Tier: <strong style="color:#e2e8f0;">{signal['label']}</strong>
+                    <div class="pbar-info">
+                      <span>🟢 UP {r['up_prob']}%</span>
+                      <span>🔴 DN {r['down_prob']}%</span>
+                    </div>
+                    <div style="margin-top:.7rem;font-family:'IBM Plex Mono',monospace;
+                                font-size:.72rem;color:#475569;">
+                      Score: <strong style="color:#e2e8f0;">{signal['score']:.0%}</strong>
+                      &nbsp;·&nbsp; {signal['label']}
                     </div>
                   </div>
 
-                  <div class="dash-card-wide" style="border-top:3px solid #1e3a8a;">
-                    <div class="card-label">Market Signals</div>
-                    <div class="ticker-mini">
-                      <div class="tmini">
-                        <div class="tmini-label">S&P 500</div>
-                        <div class="tmini-val {vc(r['sp500_ret'])}">{ar(r['sp500_ret'])} {r['sp500_ret']:+.2f}%</div>
+                  <div class="dc" style="border-top:3px solid #3b82f6;">
+                    <div class="cl">Target Open Price</div>
+                    <p class="tv">{target_str}
+                      <span style="font-size:.95rem;color:{ret_color};font-weight:700;">
+                        {ret_str}
+                      </span>
+                    </p>
+                    <div class="rbar">
+                      <span class="rlow">▼ {low_str}</span>
+                      <div class="rline"></div>
+                      <span class="rhigh">▲ {high_str}</span>
+                    </div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#475569;">
+                      Probable open range — treat as a zone
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- ROW 2 -->
+                <div class="dash-grid">
+
+                  <div class="dc-wide" style="border-top:3px solid #1e3a8a;">
+                    <div class="cl">Market Signals</div>
+                    <div class="tk">
+                      <div class="tm">
+                        <div class="tml">S&P 500</div>
+                        <div class="tmv {vc(r['sp500_ret'])}">{ar(r['sp500_ret'])} {r['sp500_ret']:+.2f}%</div>
                       </div>
-                      <div class="tmini">
-                        <div class="tmini-label">Nasdaq</div>
-                        <div class="tmini-val {vc(r['nasdaq_ret'])}">{ar(r['nasdaq_ret'])} {r['nasdaq_ret']:+.2f}%</div>
+                      <div class="tm">
+                        <div class="tml">Nasdaq</div>
+                        <div class="tmv {vc(r['nasdaq_ret'])}">{ar(r['nasdaq_ret'])} {r['nasdaq_ret']:+.2f}%</div>
                       </div>
-                      <div class="tmini">
-                        <div class="tmini-label">GIFT Nifty</div>
-                        <div class="tmini-val {vc(r['nifty_ret'])}">{ar(r['nifty_ret'])} {r['nifty_ret']:+.2f}%</div>
+                      <div class="tm">
+                        <div class="tml">GIFT Nifty</div>
+                        <div class="tmv {vc(r['nifty_ret'])}">{ar(r['nifty_ret'])} {r['nifty_ret']:+.2f}%</div>
                       </div>
-                      <div class="tmini">
-                        <div class="tmini-label">Crude Oil</div>
-                        <div class="tmini-val {vc(r.get('crude_ret',0))}">{ar(r.get('crude_ret',0))} {r.get('crude_ret',0):+.2f}%</div>
+                      <div class="tm">
+                        <div class="tml">Crude Oil</div>
+                        <div class="tmv {vc(r.get('crude_ret',0))}">{ar(r.get('crude_ret',0))} {r.get('crude_ret',0):+.2f}%</div>
                       </div>
-                      <div class="tmini">
-                        <div class="tmini-label">USD/INR</div>
-                        <div class="tmini-val {vc(r.get('usdinr_ret',0))}">{ar(r.get('usdinr_ret',0))} {r.get('usdinr_ret',0):+.2f}%</div>
+                      <div class="tm">
+                        <div class="tml">USD/INR</div>
+                        <div class="tmv {vc(r.get('usdinr_ret',0))}">{ar(r.get('usdinr_ret',0))} {r.get('usdinr_ret',0):+.2f}%</div>
                       </div>
                       {vix_html}
                     </div>
                   </div>
 
+                  <div class="dc" style="border-top:3px solid #7c3aed;">
+                    <div class="cl">Why This Prediction</div>
+                    {reasons_html}
+                  </div>
+
                 </div>
                 """, unsafe_allow_html=True)
 
-                # ── Populate tabs ─────────────────────────────────────────────
+                # ── PDF download as its own row ───────────────────────────
+                pdf_bytes = generate_pdf_report(r, commentary)
+                if pdf_bytes:
+                    st.download_button(
+                        "📄 Download Morning Brief PDF",
+                        data      = pdf_bytes,
+                        file_name = f"nifty_brief_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime      = "application/pdf",
+                        use_container_width=True
+                    )
+
+                if signal["is_expiry"]:
+                    st.warning("⚠️ Today is F&O expiry — expect elevated volatility.")
+                if signal["days_to_event"] <= 2:
+                    st.warning(f"⚠️ Major market event in {signal['days_to_event']} day(s).")
+
+                # ── TABS below cards ──────────────────────────────────────
+                st.markdown("---")
+                tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                    "📊 Options", "📈 FII/DII", "🔊 Voice",
+                    "📰 Sentiment", "📋 Watchlist"
+                ])
+
                 with tab1:
                     pcr_val = 1.0
                     try:
@@ -805,38 +894,13 @@ if "🏠" in page:
                     render_fii_dii()
 
                 with tab3:
-                    if r.get("explanation", {}).get("available"):
-                        st.markdown("**Top SHAP drivers:**")
-                        for i, reason in enumerate(r["explanation"]["reasons"][:5], 1):
-                            if isinstance(reason, dict):
-                                arrow = "🟢 ▲" if reason["shap"] > 0 else "🔴 ▼"
-                                st.markdown(f"`{i}. {reason['feature'][:28]:<28}` {arrow} strength **{reason['strength']:.4f}**")
-                    else:
-                        st.info("SHAP explanations not available.")
-
-                with tab4:
                     render_voice_briefing(commentary)
 
-                with tab5:
+                with tab4:
                     render_sentiment()
 
-                with tab6:
+                with tab5:
                     render_watchlist()
-
-                # ── PDF download ──────────────────────────────────────────────
-                pdf_bytes = generate_pdf_report(r, commentary)
-                if pdf_bytes:
-                    st.download_button(
-                        "📄 Download Morning Brief PDF",
-                        data      = pdf_bytes,
-                        file_name = f"nifty_brief_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime      = "application/pdf"
-                    )
-
-                if signal["is_expiry"]:
-                    st.warning("⚠️ Today is F&O expiry — expect elevated volatility.")
-                if signal["days_to_event"] <= 2:
-                    st.warning(f"⚠️ Major market event in {signal['days_to_event']} day(s) — signal reliability reduced.")
 
             except Exception as e:
                 st.error(f"Prediction failed: {e}")
@@ -844,11 +908,13 @@ if "🏠" in page:
     else:
         st.markdown("""
         <div style='background:rgba(15,23,42,.6);border:1.5px dashed rgba(99,179,237,.25);
-                    border-radius:16px;padding:4rem 2rem;text-align:center;margin-top:1rem;'>
+                    border-radius:16px;padding:3.5rem 2rem;text-align:center;margin-top:1rem;'>
             <p style='font-family:Playfair Display,serif;font-size:2rem;font-weight:700;
-                      color:#334155;margin:0;'>Click ⚡ Generate Prediction</p>
+                      color:#334155;margin:0 0 .4rem;'>⚡ Click Generate Prediction</p>
             <p style='font-family:IBM Plex Sans,sans-serif;font-size:1rem;
-                      color:#1e3a5f;margin:.5rem 0 0;'>to see today's market signal</p>
+                      color:#1e3a5f;margin:0;'>
+                All 6 cards will appear here instantly
+            </p>
         </div>""", unsafe_allow_html=True)
 
     if st.session_state.get("last_result"):
