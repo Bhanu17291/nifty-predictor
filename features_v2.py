@@ -107,7 +107,6 @@ def leakage_audit(df: pd.DataFrame, target_col: str = "target"):
     else:
         print("  ✅ No leakage detected — all features have acceptable target correlation")
 
-    # Specific check: nifty_ret today should NOT perfectly predict tomorrow's direction
     if "nifty_ret" in df.columns:
         nr_corr = abs(df["nifty_ret"].corr(target))
         if nr_corr > 0.5:
@@ -124,7 +123,6 @@ def leakage_audit(df: pd.DataFrame, target_col: str = "target"):
 def check_class_imbalance(y: pd.Series):
     """
     STEP 5 FIX — Compute and save class weights for use in ensemble_model.py.
-    Saves class_weights.pkl so ensemble_model.py can load them automatically.
     """
     print("\n  ── Class Imbalance Check ───────────────────────")
     counts = y.value_counts().sort_index()
@@ -135,7 +133,6 @@ def check_class_imbalance(y: pd.Series):
     print(f"  UP   (1): {counts.get(1,0):>5} rows  ({up_pct:.1f}%)")
     print(f"  DOWN (0): {counts.get(0,0):>5} rows  ({down_pct:.1f}%)")
 
-    # scale_pos_weight for XGBoost = count(negative) / count(positive)
     spw = counts.get(0, 1) / max(counts.get(1, 1), 1)
 
     if abs(up_pct - 50) < 3:
@@ -144,7 +141,6 @@ def check_class_imbalance(y: pd.Series):
         print(f"  ⚠️  Imbalance detected. scale_pos_weight = {spw:.3f}")
         print(f"     Pass this to XGBClassifier and use class_weight='balanced' in RF")
 
-    # Save for ensemble_model.py to load
     weights = {
         "scale_pos_weight" : round(spw, 4),
         "up_pct"           : round(up_pct, 2),
@@ -172,14 +168,12 @@ def build_features(closes: pd.DataFrame) -> pd.DataFrame:
         ret_cols[col] = f"{col}_ret"
 
     # ── 2. STEP 2 FIX — Z-score normalised returns ───────────────────────────
-    # These are the NORMALISED versions of raw returns.
-    # The model receives both raw and z-scored so it has context at multiple scales.
     for col in closes.columns:
         r_col = f"{col}_ret"
         if r_col in df.columns:
             df[f"{col}_ret_z20"] = rolling_zscore(df[r_col], window=20)
 
-    # ── 3. Momentum (rolling sums of raw returns) ─────────────────────────────
+    # ── 3. Momentum ───────────────────────────────────────────────────────────
     for market in ["sp500", "nasdaq", "nifty", "gift_nifty", "crude", "usdinr"]:
         r = f"{market}_ret"
         if r not in df.columns:
@@ -187,8 +181,6 @@ def build_features(closes: pd.DataFrame) -> pd.DataFrame:
         df[f"{market}_mom_3d"]  = df[r].rolling(3, min_periods=2).sum()
         df[f"{market}_mom_5d"]  = df[r].rolling(5, min_periods=3).sum()
         df[f"{market}_mom_10d"] = df[r].rolling(10, min_periods=5).sum()
-
-        # Z-scored momentum (normalised cumulative move)
         df[f"{market}_mom_5d_z20"]  = rolling_zscore(df[f"{market}_mom_5d"],  20)
         df[f"{market}_mom_10d_z20"] = rolling_zscore(df[f"{market}_mom_10d"], 20)
 
@@ -199,24 +191,23 @@ def build_features(closes: pd.DataFrame) -> pd.DataFrame:
             continue
         df[f"{market}_vol_5d"]  = df[r].rolling(5,  min_periods=3).std()
         df[f"{market}_vol_10d"] = df[r].rolling(10, min_periods=5).std()
-        # Vol ratio: short vol / long vol — >1 = vol expanding
         df[f"{market}_vol_ratio"] = (
             df[f"{market}_vol_5d"] / (df[f"{market}_vol_10d"] + 1e-9)
         )
 
     # ── 5. Divergence ─────────────────────────────────────────────────────────
     if "sp500_ret" in df.columns and "nasdaq_ret" in df.columns:
-        df["sp500_nasdaq_div"]    = df["sp500_ret"] - df["nasdaq_ret"]
-        df["sp500_nasdaq_div_z20"]= rolling_zscore(df["sp500_nasdaq_div"], 20)
+        df["sp500_nasdaq_div"]     = df["sp500_ret"] - df["nasdaq_ret"]
+        df["sp500_nasdaq_div_z20"] = rolling_zscore(df["sp500_nasdaq_div"], 20)
 
     if all(c in df.columns for c in ["sp500_ret", "nasdaq_ret", "nifty_ret"]):
-        df["us_avg_ret"]    = (df["sp500_ret"] + df["nasdaq_ret"]) / 2
-        df["us_nifty_div"]  = df["us_avg_ret"] - df["nifty_ret"]
-        df["us_avg_ret_z20"]= rolling_zscore(df["us_avg_ret"], 20)
+        df["us_avg_ret"]     = (df["sp500_ret"] + df["nasdaq_ret"]) / 2
+        df["us_nifty_div"]   = df["us_avg_ret"] - df["nifty_ret"]
+        df["us_avg_ret_z20"] = rolling_zscore(df["us_avg_ret"], 20)
 
     if "gift_nifty_ret" in df.columns and "nifty_ret" in df.columns:
-        df["gift_nifty_basis"]    = df["gift_nifty_ret"] - df["nifty_ret"]
-        df["gift_nifty_basis_z20"]= rolling_zscore(df["gift_nifty_basis"], 20)
+        df["gift_nifty_basis"]     = df["gift_nifty_ret"] - df["nifty_ret"]
+        df["gift_nifty_basis_z20"] = rolling_zscore(df["gift_nifty_basis"], 20)
 
     # ── 6. Lags ───────────────────────────────────────────────────────────────
     for market in ["sp500", "nasdaq", "nifty", "gift_nifty", "crude", "usdinr"]:
@@ -241,15 +232,12 @@ def build_features(closes: pd.DataFrame) -> pd.DataFrame:
         df["vix_extreme"] = (df["vix_level"] > 30).astype(int)
         df["vix_mom_3d"]  = df["vix_india_ret"].rolling(3, min_periods=2).sum()
         df["vix_rising"]  = (df["vix_india_ret"].rolling(3, min_periods=2).sum() > 0).astype(int)
-
-        # STEP 2 FIX — Normalise vix_level (was ~15-40, now dimensionless)
         vix_mean = df["vix_level"].rolling(252, min_periods=60).mean()
         df["vix_level_norm"] = df["vix_level"] / (vix_mean + 1e-9)
         df["vix_ret_z20"]    = rolling_zscore(df["vix_india_ret"], 20)
 
     # ── 9. USD/INR features ───────────────────────────────────────────────────
     if "usdinr_ret" in df.columns:
-        # STEP 2 FIX — Normalise usdinr_level (was ~80-85, now dimensionless)
         df["usdinr_level"]      = closes["usdinr"].ffill()
         usdinr_mean             = df["usdinr_level"].rolling(252, min_periods=60).mean()
         df["usdinr_level_norm"] = df["usdinr_level"] / (usdinr_mean + 1e-9)
@@ -262,28 +250,20 @@ def build_features(closes: pd.DataFrame) -> pd.DataFrame:
         df["crude_up"]    = (df["crude_ret"] > 0).astype(int)
 
     # ── 11. STEP 4 FIX — Cyclical calendar encoding ──────────────────────────
-    # OLD (wrong): day_of_week stored as 0,1,2,3,4
-    #              model treats Friday(4) as "2x Wednesday(2)" — meaningless
-    # NEW (correct): sin/cos encoding preserves circular structure
-    #                Friday and Monday are "close" in the cycle
-    dow = df.index.dayofweek                # 0=Mon..4=Fri
-    mon = df.index.month                    # 1..12
-    dom = df.index.day                      # 1..31
+    dow = df.index.dayofweek
+    mon = df.index.month
+    dom = df.index.day
 
     df["dow_sin"], df["dow_cos"] = sin_cos_encode(pd.Series(dow, index=df.index), 5)
     df["mon_sin"], df["mon_cos"] = sin_cos_encode(pd.Series(mon, index=df.index), 12)
     df["dom_sin"], df["dom_cos"] = sin_cos_encode(pd.Series(dom, index=df.index), 31)
 
-    # Keep useful binary flags (these are fine as integers)
     df["is_monday"]      = (dow == 0).astype(int)
     df["is_friday"]      = (dow == 4).astype(int)
     df["is_month_end"]   = (df.index.day >= 25).astype(int)
     df["is_month_start"] = (df.index.day <= 5).astype(int)
-    df["is_expiry_week"] = (df.index.day >= 25).astype(int)  # F&O expiry proxy
+    df["is_expiry_week"] = (df.index.day >= 25).astype(int)
     df["quarter"]        = df.index.quarter
-
-    # NOTE: raw day_of_week and month integers are intentionally REMOVED
-    # They caused the model to treat calendar position as a continuous scale
 
     # ── 12. Rolling correlations ──────────────────────────────────────────────
     if "sp500_ret" in df.columns and "nifty_ret" in df.columns:
@@ -307,25 +287,22 @@ def build_features(closes: pd.DataFrame) -> pd.DataFrame:
         df["sp500_dist_ma50"]  = ((sp_price - ma50_sp) / ma50_sp * 100)
         df["sp500_above_ma50"] = (sp_price > ma50_sp).astype(int)
 
-    # ── 14. Cross-market momentum diff ───────────────────────────────────────
+    # ── 14. Cross-market momentum diff ────────────────────────────────────────
     if "sp500_mom_5d" in df.columns and "nifty_mom_5d" in df.columns:
         df["cross_mom_diff"]     = df["sp500_mom_5d"] - df["nifty_mom_5d"]
         df["cross_mom_diff_z20"] = rolling_zscore(df["cross_mom_diff"], 20)
 
-    # ── 15. STEP 3 FIX — Target variable (verified clean) ────────────────────
+    # ── 15. STEP 3 FIX — Target variable (verified clean) ─────────────────────
     #
     # CORRECT construction:
     #   target[t] = 1 if nifty_close[t+1] > nifty_close[t]
     #
-    # This uses TOMORROW'S close relative to TODAY'S close.
-    # nifty_ret[t] = (close[t] - close[t-1]) / close[t-1]  ← TODAY'S return
-    # target[t]    = (close[t+1] > close[t])                ← TOMORROW'S direction
-    #
+    # nifty_ret[t] = (close[t] - close[t-1]) / close[t-1]  ← TODAY's return
+    # target[t]    = (close[t+1] > close[t])                ← TOMORROW's direction
     # These are different series — no leakage.
-    # The shift(-1) on pct_change() achieves this correctly.
-    nifty_close    = closes["nifty"].ffill()
-    tomorrow_ret   = nifty_close.pct_change().shift(-1)   # tomorrow's return
-    df["target"]   = (tomorrow_ret > 0).astype(int)
+    nifty_close  = closes["nifty"].ffill()
+    tomorrow_ret = nifty_close.pct_change().shift(-1)
+    df["target"] = (tomorrow_ret > 0).astype(int)
 
     df = df.dropna()
     return df
@@ -340,17 +317,12 @@ def main():
     closes = load_closes()
     df     = build_features(closes)
 
-    # ── Leakage audit (Step 3) ────────────────────────────────────────────────
     leakage_audit(df)
-
-    # ── Class imbalance (Step 5) ──────────────────────────────────────────────
     weights = check_class_imbalance(df["target"])
 
-    # ── Train / test split ────────────────────────────────────────────────────
     train = df[df.index.year <= 2023]
     test  = df[df.index.year >= 2024]
 
-    # Save all outputs
     df.to_csv(OUTPUT)
     train.to_csv(os.path.join(DATA_DIR, "train_v2.csv"))
     test.to_csv(os.path.join(DATA_DIR,  "test_v2.csv"))
@@ -368,7 +340,6 @@ def main():
     print("=" * 55)
     print()
 
-    # Feature group summary
     groups = {
         "raw returns"    : [c for c in feat_cols if c.endswith("_ret") and "_z" not in c],
         "z-scored"       : [c for c in feat_cols if "_z20" in c],

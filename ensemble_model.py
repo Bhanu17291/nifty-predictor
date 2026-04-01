@@ -13,6 +13,11 @@ Changes from original:
            5-fold time-series CV used to validate hyperparameters
            Prevents overfitting to the single 2019-2022 window
            Reports per-fold accuracy so you can see stability over time
+
+  [Feature names fix] feature_names_in_ explicitly set on all models after
+           training so align_features() in app.py and live_predict_v2.py
+           can always retrieve the exact column list — prevents the
+           ValueError: feature_names mismatch crash on prediction.
 """
 
 import pandas as pd
@@ -28,7 +33,7 @@ from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
 DATA_DIR   = "data"
 MODEL_DIR  = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -37,8 +42,6 @@ TRAIN_PATH   = os.path.join(DATA_DIR, "train_v2.csv")
 TEST_PATH    = os.path.join(DATA_DIR, "test_v2.csv")
 WEIGHTS_PATH = os.path.join(DATA_DIR, "class_weights.pkl")
 
-# Ensemble weights — will be replaced by optimised weights in Step 7
-# For now these are the starting point, used as fallback
 WEIGHTS = {"xgb": 0.40, "lgbm": 0.40, "rf": 0.20}
 
 
@@ -46,18 +49,13 @@ WEIGHTS = {"xgb": 0.40, "lgbm": 0.40, "rf": 0.20}
 def load_data():
     train = pd.read_csv(TRAIN_PATH, index_col=0, parse_dates=True)
     test  = pd.read_csv(TEST_PATH,  index_col=0, parse_dates=True)
-
-    # Handle both "Date" and "date" index names
     feat  = [c for c in train.columns if c != "target"]
     return (train[feat], train["target"],
             test[feat],  test["target"], feat)
 
 
 def load_class_weights() -> dict:
-    """
-    STEP 5 — Load class weights saved by features_v2.py.
-    Falls back to balanced (1.0) if file not found.
-    """
+    """STEP 5 — Load class weights saved by features_v2.py."""
     if os.path.exists(WEIGHTS_PATH):
         with open(WEIGHTS_PATH, "rb") as f:
             cw = pickle.load(f)
@@ -67,7 +65,6 @@ def load_class_weights() -> dict:
         return cw
     else:
         print("  ⚠️  class_weights.pkl not found — using balanced (1.0)")
-        print("     Run features_v2.py first to generate class weights")
         return {"scale_pos_weight": 1.0, "up_pct": 50.0, "down_pct": 50.0}
 
 
@@ -76,16 +73,7 @@ def time_series_cv(X_train: pd.DataFrame, y_train: pd.Series,
                    spw: float, n_splits: int = 5):
     """
     STEP 6 FIX — Walk-forward cross-validation on training data.
-
-    Uses TimeSeriesSplit which respects temporal order:
-      Fold 1: train on months 1-8,   validate on months 9-10
-      Fold 2: train on months 1-10,  validate on months 11-12
-      ...and so on, always training on past, validating on future.
-
-    This is critical for financial time series — random K-fold would
-    let the model "see" future data during training, inflating CV scores.
-
-    Reports per-fold accuracy so you can see if model degrades over time.
+    Uses TimeSeriesSplit which always trains on past and validates on future.
     """
     print("\n  ── TimeSeriesSplit Cross-Validation (Step 6) ──")
     print(f"  Folds: {n_splits} | Training rows: {len(X_train)}")
@@ -99,7 +87,6 @@ def time_series_cv(X_train: pd.DataFrame, y_train: pd.Series,
         X_val = X_train.iloc[val_idx]
         y_val = y_train.iloc[val_idx]
 
-        # Quick XGB fit for CV (fewer estimators for speed)
         m = XGBClassifier(
             n_estimators=150, max_depth=4, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.75,
@@ -112,7 +99,6 @@ def time_series_cv(X_train: pd.DataFrame, y_train: pd.Series,
         val_acc   = accuracy_score(y_val, val_preds)
         val_f1    = f1_score(y_val, val_preds)
 
-        # Date range of validation fold
         if hasattr(X_val.index, 'min'):
             date_range = f"{X_val.index.min().date()} → {X_val.index.max().date()}"
         else:
@@ -127,10 +113,8 @@ def time_series_cv(X_train: pd.DataFrame, y_train: pd.Series,
     mean_f1  = np.mean([r["f1"]  for r in fold_results])
     print(f"\n  CV Summary: acc={mean_acc*100:.1f}% ± {std_acc*100:.1f}%  f1={mean_f1:.3f}")
 
-    # Stability check: if std > 5%, model performance is unstable across time
     if std_acc > 0.05:
         print(f"  ⚠️  High variance across folds ({std_acc*100:.1f}%) — model may not generalise well")
-        print(f"     Consider: more regularisation, fewer features, or longer training window")
     else:
         print(f"  ✅ Model is stable across time folds")
 
@@ -138,12 +122,22 @@ def time_series_cv(X_train: pd.DataFrame, y_train: pd.Series,
     return fold_results, mean_acc, mean_f1
 
 
-# ── Train each model (with class imbalance fix) ───────────────────────────────
+# ── Train each model ──────────────────────────────────────────────────────────
+def _stamp_feature_names(model, feat_cols: list):
+    """
+    Explicitly store feature_names_in_ on any model that supports it.
+    This ensures align_features() in app.py and live_predict_v2.py can
+    always retrieve the exact column list regardless of sklearn version.
+    """
+    try:
+        model.feature_names_in_ = np.array(feat_cols)
+    except Exception:
+        pass
+    return model
+
+
 def train_xgb(X_train: pd.DataFrame, y_train: pd.Series, spw: float):
-    """
-    STEP 5 FIX — scale_pos_weight now passed from class_weights.pkl.
-    Previously hardcoded to default (1.0 = assumes balanced classes).
-    """
+    """STEP 5 FIX — scale_pos_weight now loaded from class_weights.pkl."""
     print("  Training XGBoost...")
     m = XGBClassifier(
         n_estimators=300,
@@ -153,22 +147,21 @@ def train_xgb(X_train: pd.DataFrame, y_train: pd.Series, spw: float):
         colsample_bytree=0.75,
         min_child_weight=5,
         gamma=0.1,
-        # STEP 5 FIX: was missing entirely — now loaded from class_weights.pkl
         scale_pos_weight=spw,
         random_state=42,
         eval_metric="logloss",
         verbosity=0,
     )
     m.fit(X_train, y_train)
+    # XGBoost stores feature names internally via get_booster().feature_names
+    # but we also stamp feature_names_in_ for consistency with sklearn API
+    _stamp_feature_names(m, list(X_train.columns))
     print(f"  ✅ XGBoost done  (scale_pos_weight={spw:.3f})")
     return m
 
 
 def train_lgbm(X_train: pd.DataFrame, y_train: pd.Series, spw: float):
-    """
-    STEP 5 FIX — is_unbalance=True added.
-    LightGBM handles imbalance internally when this flag is set.
-    """
+    """STEP 5 FIX — is_unbalance=True added."""
     print("  Training LightGBM...")
     m = LGBMClassifier(
         n_estimators=300,
@@ -177,33 +170,30 @@ def train_lgbm(X_train: pd.DataFrame, y_train: pd.Series, spw: float):
         subsample=0.8,
         colsample_bytree=0.75,
         min_child_samples=20,
-        # STEP 5 FIX: was missing — now enabled
         is_unbalance=True,
         random_state=42,
         verbose=-1,
     )
     m.fit(X_train, y_train)
+    _stamp_feature_names(m, list(X_train.columns))
     print(f"  ✅ LightGBM done  (is_unbalance=True)")
     return m
 
 
 def train_rf(X_train: pd.DataFrame, y_train: pd.Series):
-    """
-    STEP 5 FIX — class_weight='balanced' added.
-    RF now weights minority class samples inversely proportional to frequency.
-    """
+    """STEP 5 FIX — class_weight='balanced' added."""
     print("  Training Random Forest...")
     m = RandomForestClassifier(
         n_estimators=200,
         max_depth=6,
         min_samples_leaf=10,
         max_features="sqrt",
-        # STEP 5 FIX: was missing entirely
         class_weight="balanced",
         random_state=42,
         n_jobs=-1,
     )
     m.fit(X_train, y_train)
+    _stamp_feature_names(m, list(X_train.columns))
     print(f"  ✅ Random Forest done  (class_weight='balanced')")
     return m
 
@@ -267,10 +257,9 @@ def evaluate_all(models: dict,
 
 # ── Plots ─────────────────────────────────────────────────────────────────────
 def plot_cv_results(fold_results: list):
-    """Plot per-fold accuracy to visualise model stability over time."""
-    folds = [r["fold"]   for r in fold_results]
+    folds = [r["fold"]    for r in fold_results]
     accs  = [r["acc"]*100 for r in fold_results]
-    f1s   = [r["f1"]     for r in fold_results]
+    f1s   = [r["f1"]      for r in fold_results]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4), facecolor="white")
     for ax in axes:
@@ -281,7 +270,7 @@ def plot_cv_results(fold_results: list):
         ax.grid(True, alpha=0.3, axis="y")
         ax.tick_params(colors="#475569", labelsize=8)
 
-    axes[0].plot(folds, accs,  "o-", color="#1e3a8a", linewidth=2, markersize=7)
+    axes[0].plot(folds, accs, "o-", color="#1e3a8a", linewidth=2, markersize=7)
     axes[0].axhline(50, color="#f87171", linestyle="--", linewidth=1, alpha=0.7)
     axes[0].axhline(np.mean(accs), color="#64748b", linestyle=":", linewidth=1)
     axes[0].set_title("CV Accuracy per Fold", fontsize=12, color="#0f172a", pad=10)
@@ -370,14 +359,25 @@ def plot_feature_importance(models: dict, feat_cols: list):
 
 
 # ── Save ──────────────────────────────────────────────────────────────────────
-def save_models(models: dict):
+def save_models(models: dict, feat_cols: list):
+    """
+    Save each model. Also saves the feature column list separately so
+    align_features() always has a ground-truth source even if the model
+    object loses its feature_names_in_ attribute after pickling/unpickling.
+    """
     for name, m in models.items():
         path = os.path.join(MODEL_DIR, f"{name}_model_v2.pkl")
         with open(path, "wb") as f:
             pickle.dump(m, f)
         print(f"  💾 Saved → {path}")
 
-    config = {"weights": WEIGHTS, "threshold": 0.5}
+    # Save authoritative feature list as a separate file
+    feat_path = os.path.join(MODEL_DIR, "feature_cols_v2.pkl")
+    with open(feat_path, "wb") as f:
+        pickle.dump(feat_cols, f)
+    print(f"  💾 Saved → {feat_path}  ({len(feat_cols)} features)")
+
+    config = {"weights": WEIGHTS, "threshold": 0.5, "feature_cols": feat_cols}
     with open(os.path.join(MODEL_DIR, "ensemble_config.pkl"), "wb") as f:
         pickle.dump(config, f)
     print(f"  💾 Saved → models/ensemble_config.pkl")
@@ -414,7 +414,9 @@ def main():
     print("  Generating plots...")
     plot_comparison(results)
     plot_feature_importance(models, feat_cols)
-    save_models(models)
+
+    # Pass feat_cols to save so feature list is persisted alongside models
+    save_models(models, feat_cols)
 
     ens_acc = results["ensemble"]["test_acc"]
     print()

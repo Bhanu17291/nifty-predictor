@@ -1,3 +1,29 @@
+from multi_index import render_multi_index
+from target_price import render_target_price, load_magnitude_model, train_magnitude_model
+from options_recommender import render_options_recommender
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from voice_briefing import render_voice_briefing
+from confidence_chart import render_confidence_chart
+from theme_config import render_theme_toggle, apply_theme
+from options_signals import render_options_signals
+from fii_dii import render_fii_dii
+from economic_calendar import render_economic_calendar
+from sector_heatmap import render_sector_heatmap
+from walk_forward import render_walk_forward
+
+from outcome_tracker import log_prediction, get_scorecard, update_actuals
+from market_heatmap import render_heatmap
+from plain_reasoning import generate_reasoning
+from calibration import load_calibrated_model, plot_reliability_diagram
+from drift_monitor import render_drift_chart
+from signal_scorer import compute_signal
+from backtest_playground import render_playground
+from sentiment import render_sentiment
+from watchlist import render_watchlist
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,7 +38,6 @@ from sklearn.metrics import accuracy_score, f1_score
 st.set_page_config(page_title="Nifty Intelligence", page_icon="📈",
                    layout="wide", initial_sidebar_state="expanded")
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -74,7 +99,6 @@ section[data-testid="stSidebar"] *{color:#e2e8f0!important;}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Config ────────────────────────────────────────────────────────────────────
 DATA_DIR        = "data"
 MODEL_DIR       = "models"
 HISTORY_FILE    = "data/prediction_history.json"
@@ -96,7 +120,6 @@ USE_V2     = (os.path.exists(os.path.join(DATA_DIR,"features_v2.csv")) and
 FEAT_PATH  = os.path.join(DATA_DIR,"features_v2.csv"  if USE_V2 else "features.csv")
 MODEL_PATH = os.path.join(MODEL_DIR,"xgb_model_v2.pkl" if USE_V2 else "xgb_model.pkl")
 
-# ── Loaders ───────────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_primary_model():
     with open(MODEL_PATH,"rb") as f: return pickle.load(f)
@@ -130,19 +153,69 @@ test_df      = df[df.index.year >= 2023].copy()
 X_test       = test_df[feature_cols]
 y_test       = test_df["target"]
 
-def get_preds_proba(X):
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE ALIGNMENT — fixes the ValueError at startup
+# ══════════════════════════════════════════════════════════════════════════════
+def get_model_features(model):
+    """Extract the exact feature list a trained model expects."""
+    try:
+        names = model.get_booster().feature_names
+        if names:
+            return list(names)
+    except Exception:
+        pass
+    try:
+        names = model.feature_names_in_
+        if names is not None:
+            return list(names)
+    except Exception:
+        pass
+    return None
+
+
+def align_features(model, X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reorder and/or fill X so it exactly matches what `model` was trained on.
+    Safe to call at module load time — no st.warning calls here.
+    """
+    expected = get_model_features(model)
+    if expected is None:
+        return X
+    missing = [c for c in expected if c not in X.columns]
+    X_aligned = X.copy()
+    for col in missing:
+        X_aligned[col] = 0.0
+    return X_aligned[expected]
+
+
+def get_preds_proba(X: pd.DataFrame):
+    def _xgb_predict(model, X_input):
+        X_al = align_features(model, X_input)
+        raw  = model.get_booster().inplace_predict(X_al.values, validate_features=False)
+        return 1.0 / (1.0 + np.exp(-raw))
+
+    def _skl_predict(model, X_input):
+        X_al = align_features(model, X_input)
+        return model.predict_proba(X_al)[:, 1]
+
     if all_models:
-        W = {"xgb":.40,"lgbm":.40,"rf":.20}
-        p = (all_models["xgb"].predict_proba(X)[:,1]*W["xgb"] +
-             all_models["lgbm"].predict_proba(X)[:,1]*W["lgbm"] +
-             all_models["rf"].predict_proba(X)[:,1]*W["rf"])
-        return (p>=.5).astype(int), p
-    p = primary_model.predict_proba(X)[:,1]
-    return (p>=.5).astype(int), p
+        W = {"xgb": .40, "lgbm": .40, "rf": .20}
+        p = (_xgb_predict(all_models["xgb"],  X) * W["xgb"]  +
+             _skl_predict(all_models["lgbm"], X) * W["lgbm"] +
+             _skl_predict(all_models["rf"],   X) * W["rf"])
+        return (p >= .5).astype(int), p
 
-preds, proba = get_preds_proba(X_test)
+    p = _xgb_predict(primary_model, X)
+    return (p >= .5).astype(int), p
 
-# Backtest
+# ══════════════════════════════════════════════════════════════════════════════
+
+try:
+    preds, proba = get_preds_proba(X_test)
+except Exception as e:
+    st.error(f"❌ Model prediction failed at startup: {e}")
+    st.stop()
+
 actual_rets = test_df["nifty_ret"].values/100
 cap_s=cap_b=INITIAL_CAPITAL; s_curve=[INITIAL_CAPITAL]; b_curve=[INITIAL_CAPITAL]
 wins=trades=0; monthly_pnl={}
@@ -158,7 +231,6 @@ win_rate=(wins/trades*100) if trades else 0
 s_ret=(cap_s/INITIAL_CAPITAL-1)*100; b_ret=(cap_b/INITIAL_CAPITAL-1)*100
 acc=accuracy_score(y_test,preds); f1=f1_score(y_test,preds)
 
-# ── History helpers ───────────────────────────────────────────────────────────
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE,"r") as f: return json.load(f)
@@ -178,7 +250,6 @@ def add_to_history(r):
         history.append(entry); save_history(history)
     return history
 
-# ── Confidence gauge ──────────────────────────────────────────────────────────
 def plot_confidence_gauge(confidence,pred_int):
     fig,ax=plt.subplots(figsize=(4,2.2),subplot_kw={"projection":"polar"},facecolor="#0d1117")
     for t_start,t_end,color in [(np.pi,np.pi*1.2,"#7f1d1d"),(np.pi*1.2,np.pi*1.5,"#7c3d12"),(np.pi*1.5,np.pi*2,"#14532d")]:
@@ -199,7 +270,6 @@ def plot_confidence_gauge(confidence,pred_int):
             color="#64748b",fontfamily="monospace")
     plt.tight_layout(pad=0); return fig
 
-# ── What-If simulator ─────────────────────────────────────────────────────────
 def run_whatif(sp500,nasdaq,gift,crude=0.0,usdinr=0.0):
     base=X_test.tail(1).copy()
     for col,val in [("sp500_ret",sp500),("nasdaq_ret",nasdaq),("gift_nifty_ret",gift),
@@ -210,7 +280,6 @@ def run_whatif(sp500,nasdaq,gift,crude=0.0,usdinr=0.0):
     up=float(sim_p[0])*100; pred=1 if up>=50 else 0; conf=up if pred==1 else 100-up
     return round(up,1),round(100-up,1),pred,round(conf,1)
 
-# ── Accuracy heatmap ──────────────────────────────────────────────────────────
 def plot_accuracy_heatmap():
     correct=(preds==y_test.values).astype(int)
     dates=test_df.index
@@ -232,20 +301,17 @@ def plot_accuracy_heatmap():
                                     color="#e2e8f0",fontsize=11,pad=10)
     plt.tight_layout(); return fig
 
-# ── Monthly P&L heatmap ───────────────────────────────────────────────────────
 def plot_monthly_pnl():
     pnl_data={}
     for mo,val in monthly_pnl.items():
         yr,mn=mo.split("-")
         pnl_data.setdefault(yr,{})[int(mn)]=val*100
-
     years=sorted(pnl_data.keys())
     months_labels=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     data=np.full((len(years),12),np.nan)
     for yi,yr in enumerate(years):
         for mi in range(12):
             data[yi,mi]=pnl_data[yr].get(mi+1,np.nan)
-
     fig,ax=plt.subplots(figsize=(14,max(3,len(years)*1.5)),facecolor="#0d1117")
     ax.set_facecolor("#0d1117")
     for yi in range(len(years)):
@@ -258,31 +324,26 @@ def plot_monthly_pnl():
             ax.add_patch(rect)
             ax.text(mi+0.45,yi+0.35,f"{val:+.1f}%",ha="center",va="center",
                     fontsize=7,color="#e2e8f0",fontweight="bold")
-
     ax.set_xlim(0,12); ax.set_ylim(0,len(years))
     ax.set_xticks(np.arange(12)+0.45); ax.set_xticklabels(months_labels,color="#64748b",fontsize=9)
     ax.set_yticks(np.arange(len(years))+0.35); ax.set_yticklabels(years,color="#64748b",fontsize=9)
     ax.set_title("Monthly Strategy P&L Heatmap",color="#e2e8f0",fontsize=11,pad=10)
     plt.tight_layout(); return fig
 
-# ── GPT Commentary ────────────────────────────────────────────────────────────
 def generate_commentary(result):
     sp  = result.get("sp500_ret",0)
     nas = result.get("nasdaq_ret",0)
-    gif = result.get("nifty_ret",0)
     crd = result.get("crude_ret",0)
     vix = result.get("vix",None)
     reg = result.get("regime","FLAT")
     conf= result.get("confidence",50)
     pred= result.get("pred_int",0)
-
     us_tone    = "positive" if (sp+nas)/2>0 else "negative"
     crude_tone = "rising" if crd>0 else "falling"
     vix_tone   = f"VIX at {vix:.1f} suggests {'elevated caution' if vix and vix>18 else 'calm markets'}." if vix else ""
     conf_tone  = "strong conviction" if conf>=65 else "moderate confidence" if conf>=55 else "low confidence — treat with caution"
     signal     = "gap-up open" if pred==1 else "gap-down open"
     regime_txt = {"BULL":"bullish trending","BEAR":"bearish trending","FLAT":"consolidating"}.get(reg,"neutral")
-
     lines=[
         f"US markets closed on a {us_tone} note — S&P500 {sp:+.2f}%, Nasdaq {nas:+.2f}%.",
         f"GIFT Nifty is indicating a {signal} with model confidence at {conf:.1f}% ({conf_tone}).",
@@ -290,7 +351,6 @@ def generate_commentary(result):
     ]
     return " ".join(lines)
 
-# ── Telegram sender ───────────────────────────────────────────────────────────
 def send_telegram(token, chat_id, message):
     try:
         import urllib.request, urllib.parse
@@ -323,7 +383,6 @@ def format_telegram_message(result):
     msg += "\n\n⚠️ <i>For educational purposes only. Not financial advice.</i>"
     return msg
 
-# ── PDF Report ────────────────────────────────────────────────────────────────
 def generate_pdf_report(result, commentary):
     try:
         from reportlab.lib.pagesizes import A4
@@ -332,14 +391,12 @@ def generate_pdf_report(result, commentary):
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
         from reportlab.lib.units import inch
         import io
-
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4,
                                 rightMargin=inch*0.8, leftMargin=inch*0.8,
                                 topMargin=inch*0.8, bottomMargin=inch*0.8)
         styles = getSampleStyleSheet()
         story  = []
-
         title_style = ParagraphStyle("title", parent=styles["Title"],
                                      fontSize=22, spaceAfter=6, textColor=colors.HexColor("#1e3a8a"))
         sub_style   = ParagraphStyle("sub", parent=styles["Normal"],
@@ -348,66 +405,42 @@ def generate_pdf_report(result, commentary):
                                      fontSize=14, textColor=colors.HexColor("#1e3a8a"), spaceBefore=16, spaceAfter=8)
         body_style  = ParagraphStyle("body", parent=styles["Normal"],
                                      fontSize=11, leading=16, spaceAfter=10)
-
         story.append(Paragraph("📈 Nifty Intelligence — Morning Market Brief", title_style))
         story.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y, %I:%M %p IST')}", sub_style))
-
         pred_color = "#15803d" if result["pred_int"]==1 else "#b91c1c"
         pred_text  = "🟢 BULLISH OPEN EXPECTED" if result["pred_int"]==1 else "🔴 BEARISH OPEN EXPECTED"
         story.append(Paragraph("Prediction Signal", h2_style))
         story.append(Paragraph(f"<font color='{pred_color}'><b>{pred_text}</b></font>", body_style))
-
-        signal_data = [
-            ["Metric","Value"],
-            ["Confidence", f"{result['confidence']}%"],
-            ["UP Probability", f"{result['up_prob']}%"],
-            ["DOWN Probability", f"{result['down_prob']}%"],
-            ["Regime", result.get("regime","N/A")],
-            ["Signal Tier", result.get("tier_label","N/A")],
-        ]
+        signal_data = [["Metric","Value"],["Confidence", f"{result['confidence']}%"],
+                       ["UP Probability", f"{result['up_prob']}%"],["DOWN Probability", f"{result['down_prob']}%"],
+                       ["Regime", result.get("regime","N/A")],["Signal Tier", result.get("tier_label","N/A")]]
         t = Table(signal_data, colWidths=[3*inch, 3*inch])
         t.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e3a8a")),
-            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-            ("FONTSIZE",(0,0),(-1,-1),10),
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e3a8a")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),10),
             ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.HexColor("#f8fafc"),colors.white]),
-            ("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#e2e8f0")),
-            ("PADDING",(0,0),(-1,-1),8),
+            ("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#e2e8f0")),("PADDING",(0,0),(-1,-1),8),
         ]))
         story.append(t); story.append(Spacer(1,12))
-
         story.append(Paragraph("Market Signals", h2_style))
-        market_data = [
-            ["Index","Change"],
-            ["S&P 500", f"{result['sp500_ret']:+.2f}%"],
-            ["Nasdaq", f"{result['nasdaq_ret']:+.2f}%"],
-            ["GIFT Nifty (proxy)", f"{result['nifty_ret']:+.2f}%"],
-            ["Crude Oil", f"{result.get('crude_ret',0):+.2f}%"],
-            ["USD/INR", f"{result.get('usdinr_ret',0):+.2f}%"],
-        ]
+        market_data = [["Index","Change"],["S&P 500", f"{result['sp500_ret']:+.2f}%"],
+                       ["Nasdaq", f"{result['nasdaq_ret']:+.2f}%"],["GIFT Nifty", f"{result['nifty_ret']:+.2f}%"],
+                       ["Crude Oil", f"{result.get('crude_ret',0):+.2f}%"],["USD/INR", f"{result.get('usdinr_ret',0):+.2f}%"]]
         if result.get("vix"):
             market_data.append(["India VIX", str(result["vix"])])
         t2 = Table(market_data, colWidths=[3*inch,3*inch])
         t2.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e3a8a")),
-            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-            ("FONTSIZE",(0,0),(-1,-1),10),
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e3a8a")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),10),
             ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.HexColor("#f8fafc"),colors.white]),
-            ("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#e2e8f0")),
-            ("PADDING",(0,0),(-1,-1),8),
+            ("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#e2e8f0")),("PADDING",(0,0),(-1,-1),8),
         ]))
         story.append(t2); story.append(Spacer(1,12))
-
         story.append(Paragraph("Market Commentary", h2_style))
         story.append(Paragraph(commentary, body_style))
-
         story.append(Spacer(1,20))
-        story.append(Paragraph("<font color='#94a3b8'><i>⚠️ This report is generated by an ML model for educational purposes only. Not financial advice. Always conduct independent research before making investment decisions.</i></font>", body_style))
-
-        doc.build(story)
-        buf.seek(0)
+        story.append(Paragraph("<font color='#94a3b8'><i>⚠️ Educational purposes only. Not financial advice.</i></font>", body_style))
+        doc.build(story); buf.seek(0)
         return buf.getvalue()
     except ImportError:
         return None
@@ -416,26 +449,35 @@ def generate_pdf_report(result, commentary):
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
+    render_theme_toggle()
+    apply_theme()
+
     st.markdown("""
     <div style='text-align:center;padding:1rem 0 1.5rem;border-bottom:1px solid rgba(99,179,237,.15);margin-bottom:1.5rem;'>
         <p style='font-family:Playfair Display,serif;font-size:1.4rem;font-weight:800;color:#f1f5f9;margin:0;'>
             📈 Nifty Intel
         </p>
         <p style='font-family:IBM Plex Mono,monospace;font-size:.65rem;color:#60a5fa;margin:.3rem 0 0;letter-spacing:.15em;text-transform:uppercase;'>
-            {'Tier 3 · Ensemble' if USE_V2 else 'Tier 1 · XGBoost'}
+            Tier 3 · Ensemble
         </p>
     </div>
-    """.replace("{'Tier 3 · Ensemble' if USE_V2 else 'Tier 1 · XGBoost'}", "Tier 3 · Ensemble" if USE_V2 else "Tier 1 · XGBoost"),
-    unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     page = st.radio("Navigation", [
         "🏠  Live Prediction",
         "🧪  What-If Simulator",
         "📊  Analytics",
         "📅  Heatmaps",
+        "📈  Multi-Index",
         "📋  History",
         "⚙️  Settings & Retrain",
     ], label_visibility="collapsed")
+
+    st.divider()
+    render_economic_calendar()
+
+    st.divider()
+    render_sector_heatmap()
 
     st.markdown("""
     <div style='margin-top:2rem;padding-top:1rem;border-top:1px solid rgba(99,179,237,.1);
@@ -462,6 +504,17 @@ if "🏠" in page:
     st.markdown('<p class="sec-label">Live Signal</p>', unsafe_allow_html=True)
     st.markdown("<p class=\"sec-title\">Tomorrow's Opening Prediction</p>", unsafe_allow_html=True)
 
+    render_heatmap()
+    st.divider()
+
+    score = get_scorecard(30)
+    if score["total"] > 0:
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("30-day accuracy", f"{score['accuracy']:.1%}")
+        sc2.metric("Correct calls",   score["correct"])
+        sc3.metric("Total tracked",   score["total"])
+        st.divider()
+
     col_btn, col_main, col_gauge = st.columns([1,2,1], gap="large")
 
     with col_btn:
@@ -482,20 +535,22 @@ if "🏠" in page:
                     else:
                         from live_predict import predict_tomorrow
                         r = predict_tomorrow(verbose=False)
-                        r.update({"regime":"N/A","regime_emoji":"","tier_label":"","tier_emoji":"",
-                                  "tier":"MODERATE","crude_ret":0,"usdinr_ret":0,"vix":None,
-                                  "explanation":{"available":False}})
+
                     st.session_state["last_result"] = r
                     add_to_history(r)
                     commentary = generate_commentary(r)
                     st.session_state["commentary"] = commentary
 
-                    reg      = r.get("regime","")
-                    reg_cls  = f"regime-{reg.lower()}" if reg in ["BULL","BEAR","FLAT"] else "regime-flat"
-                    tier_cls = f"tier-{r.get('tier','moderate').lower()}"
+                    pred_direction  = "UP" if r["pred_int"] == 1 else "DOWN"
+                    pred_confidence = r["confidence"] / 100
+                    log_prediction(pred_direction, pred_confidence)
+
+                    reg     = r.get("regime","")
+                    reg_cls = f"regime-{reg.lower()}" if reg in ["BULL","BEAR","FLAT"] else "regime-flat"
+                    tier_cls= f"tier-{r.get('tier','moderate').lower()}"
 
                     st.markdown(f"""
-                    <span class="regime-badge {reg_cls}">{r['regime_emoji']} {reg} REGIME</span>
+                    <span class="regime-badge {reg_cls}">{r.get('regime_emoji','')} {reg} REGIME</span>
                     &nbsp;
                     <span class="regime-badge {tier_cls}">{r.get('tier_emoji','')} {r.get('tier_label','')}</span>
                     """, unsafe_allow_html=True)
@@ -532,18 +587,129 @@ if "🏠" in page:
                     for s in ax.spines.values(): s.set_visible(False)
                     plt.tight_layout(pad=.2); st.pyplot(fig); plt.close()
 
-                    # AI Commentary
-                    st.markdown('<p class="sec-label" style="margin-top:1rem;">AI Market Commentary</p>', unsafe_allow_html=True)
+                    # ── Signal score ──
+                    st.divider()
+                    current_vix = r["vix"] if r.get("vix") else 15.0
+                    signal = compute_signal(confidence=pred_confidence, vix=current_vix)
+                    sig1, sig2, sig3 = st.columns(3)
+                    sig1.metric("Signal tier",    signal["label"])
+                    sig2.metric("Adjusted score", f"{signal['score']:.1%}")
+                    sig3.metric("VIX penalty",    f"-{signal['vix_penalty']:.0%}" if signal["vix_penalty"] else "None")
+                    if signal["is_expiry"]:
+                        st.warning("Today is F&O expiry — expect elevated volatility.")
+                    if signal["days_to_event"] <= 2:
+                        st.warning(f"Major market event in {signal['days_to_event']} day(s) — signal reliability reduced.")
+
+                    # ── Target price ──
+                    st.divider()
+                    st.markdown('<p class="sec-label">Expected Open Range</p>', unsafe_allow_html=True)
+                    mag = r.get("magnitude", {})
+                    if mag.get("available"):
+                        mp1, mp2, mp3 = st.columns(3)
+                        mp1.metric("Predicted return", f"{mag['predicted_ret']:+.2f}%")
+                        mp2.metric("Target open",      f"₹{mag['pred_price']:,.0f}")
+                        mp3.metric("Range",            f"₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}")
+                        color_m = "#22c55e" if mag["predicted_ret"] > 0 else "#ef4444"
+                        st.markdown(f"""
+                        <div style='background:rgba(15,23,42,.7);border:1px solid rgba(99,179,237,.15);
+                                    border-left:4px solid {color_m};border-radius:10px;padding:1rem 1.4rem;'>
+                            <p style='font-family:IBM Plex Sans,sans-serif;font-size:1rem;color:#cbd5e1;margin:0;'>
+                            Nifty is expected to open around
+                            <strong style='color:{color_m};'>₹{mag['pred_price']:,.0f}</strong>
+                            ({mag['predicted_ret']:+.2f}%), with a probable range of
+                            <strong>₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}</strong>.
+                            Treat as a zone, not a precise level.
+                            </p>
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        try:
+                            import yfinance as _yf
+                            _np = float(_yf.download("^NSEI", period="2d", interval="1d", progress=False)["Close"].iloc[-1])
+                            mag_model, mag_scaler = load_magnitude_model()
+                            if mag_model is None:
+                                mag_model, mag_scaler = train_magnitude_model(df, feature_cols)
+                            if mag_model is not None:
+                                render_target_price(X_test.tail(1), _np, df, feature_cols)
+                        except Exception:
+                            st.info("Target price unavailable — market data not fetched yet.")
+
+                    # ── Options strategy recommender ──
+                    st.divider()
+                    opts_strat = r.get("options_strategy")
+                    pcr_val = 1.0
+                    try:
+                        from options_signals import fetch_options_data
+                        opts_data = fetch_options_data()
+                        if opts_data.get("available"):
+                            pcr_val = opts_data["pcr"]
+                    except Exception:
+                        pass
+                    render_options_recommender(
+                        direction    = pred_direction,
+                        signal_label = signal["label"],
+                        vix          = current_vix,
+                        pcr          = pcr_val,
+                        current_price= mag.get("current_price", 22000)
+                    )
+
+                    # ── Plain English reasoning ──
+                    st.divider()
+                    st.markdown('<p class="sec-label">Why this prediction</p>', unsafe_allow_html=True)
+                    shap_top_features = []
+                    if r.get("explanation", {}).get("available"):
+                        reasons_raw = r["explanation"].get("reasons", [])
+                        for reason in reasons_raw[:3]:
+                            if isinstance(reason, dict):
+                                shap_top_features.append((reason.get("feature",""), reason.get("shap", 0)))
+                            elif isinstance(reason, str):
+                                try:
+                                    parts = reason.split(":")
+                                    shap_top_features.append((parts[0].strip(), float(parts[1].strip())))
+                                except Exception:
+                                    pass
+                    live_data = {
+                        "SP500_return"     : r["sp500_ret"],
+                        "Nasdaq_return"    : r["nasdaq_ret"],
+                        "India_VIX"        : current_vix,
+                        "USDINR_return"    : r.get("usdinr_ret", 0),
+                        "Crude_return"     : r.get("crude_ret", 0),
+                        "GIFT_Nifty_return": r["nifty_ret"],
+                    }
+                    reasons = generate_reasoning(shap_top_features, live_data, pred_direction)
+                    if reasons:
+                        for reason_text in reasons:
+                            st.markdown(f"- {reason_text}")
+                    else:
+                        st.markdown(f"- S&P 500 closed {r['sp500_ret']:+.2f}% overnight.")
+                        st.markdown(f"- Nasdaq closed {r['nasdaq_ret']:+.2f}% overnight.")
+                        st.markdown(f"- India VIX is at {current_vix:.1f}.")
+                        st.markdown(f"- USD/INR moved {r.get('usdinr_ret',0):+.2f}%.")
+
+                    # ── AI Commentary ──
+                    st.divider()
+                    st.markdown('<p class="sec-label">AI Market Commentary</p>', unsafe_allow_html=True)
                     st.markdown(f'<div class="commentary-card"><p class="commentary-text">🤖 {commentary}</p></div>', unsafe_allow_html=True)
 
-                    # SHAP
                     if r.get("explanation",{}).get("available"):
-                        st.markdown("**Why this prediction:**")
+                        st.markdown("**Top SHAP drivers:**")
                         for i,reason in enumerate(r["explanation"]["reasons"][:5],1):
-                            arrow="🟢 ▲" if reason["shap"]>0 else "🔴 ▼"
-                            st.markdown(f"`{i}. {reason['feature'][:28]:<28}` {arrow} strength **{reason['strength']:.4f}**")
+                            if isinstance(reason, dict):
+                                arrow="🟢 ▲" if reason["shap"]>0 else "🔴 ▼"
+                                st.markdown(f"`{i}. {reason['feature'][:28]:<28}` {arrow} strength **{reason['strength']:.4f}**")
 
-                    # PDF download
+                    # ── Voice briefing ──
+                    st.divider()
+                    render_voice_briefing(commentary)
+
+                    # ── Options signals ──
+                    st.divider()
+                    render_options_signals()
+
+                    # ── FII/DII ──
+                    st.divider()
+                    render_fii_dii()
+
+                    # ── PDF ──
                     pdf_bytes = generate_pdf_report(r, commentary)
                     if pdf_bytes:
                         st.download_button("📄 Download Morning Brief PDF",
@@ -552,6 +718,14 @@ if "🏠" in page:
                                            mime="application/pdf")
                     else:
                         st.info("Install `reportlab` to enable PDF: `pip install reportlab`")
+
+                    # ── Sentiment ──
+                    st.divider()
+                    render_sentiment()
+
+                    # ── Watchlist ──
+                    st.divider()
+                    render_watchlist()
 
                 except Exception as e:
                     st.error(f"Prediction failed: {e}")
@@ -587,7 +761,7 @@ elif "🧪" in page:
     with s1:
         sp500_sim  = st.slider("S&P 500 move (%)",  -4.0,4.0,0.0,0.1)
         nasdaq_sim = st.slider("Nasdaq move (%)",   -4.0,4.0,0.0,0.1)
-        gift_sim   = st.slider("GIFT Nifty move (%%)", -3.0,3.0,0.0,0.1)
+        gift_sim   = st.slider("GIFT Nifty move (%)", -3.0,3.0,0.0,0.1)
     with s2:
         crude_sim  = st.slider("Crude Oil move (%)", -5.0,5.0,0.0,0.1)
         usdinr_sim = st.slider("USD/INR move (%)",   -1.5,1.5,0.0,0.05)
@@ -608,7 +782,6 @@ elif "🧪" in page:
         plt.tight_layout(pad=0); st.pyplot(fig); plt.close()
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Scenario presets
     st.divider()
     st.markdown('<p class="sec-label">Quick Scenarios</p>', unsafe_allow_html=True)
     sc1,sc2,sc3,sc4 = st.columns(4)
@@ -681,7 +854,7 @@ elif "📊" in page:
     with c3:
         st.markdown('<div class="chart-wrap"><p class="chart-label">Feature Importance — Top 15</p>', unsafe_allow_html=True)
         feat_src=all_models["xgb"] if all_models else primary_model
-        imp=pd.Series(feat_src.feature_importances_,index=feature_cols).sort_values(ascending=False).head(15)
+        imp=pd.Series(feat_src.feature_importances_,index=get_model_features(feat_src) or feature_cols).sort_values(ascending=False).head(15)
         colors_imp=["#3b82f6" if i<3 else "#1e3a5f" for i in range(len(imp))]
         fig,ax=plt.subplots(figsize=(7,4.5))
         imp[::-1].plot(kind="barh",ax=ax,color=colors_imp[::-1],edgecolor="none")
@@ -707,6 +880,36 @@ elif "📊" in page:
         from PIL import Image
         st.image(Image.open(shap_path), use_container_width=True)
 
+    st.divider()
+    st.markdown('<p class="sec-label">Model Health</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sec-title">Model Drift Monitor</p>', unsafe_allow_html=True)
+    render_drift_chart()
+
+    st.divider()
+    render_playground()
+
+    st.divider()
+    st.markdown('<p class="sec-label">Calibration</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sec-title">Reliability Diagram</p>', unsafe_allow_html=True)
+    cal_model = load_calibrated_model()
+    if cal_model:
+        st.success("Calibrated model loaded.")
+        try:
+            y_prob_cal = cal_model.predict_proba(align_features(cal_model, X_test))[:,1]
+            plot_reliability_diagram(y_test.values, y_prob_cal)
+        except Exception as e:
+            st.warning(f"Could not plot reliability diagram: {e}")
+    else:
+        st.info("No calibrated model found. Run calibration.py after retraining.")
+
+    st.divider()
+    st.markdown('<p class="sec-label">Prediction Tracking</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sec-title">Confidence vs Accuracy Over Time</p>', unsafe_allow_html=True)
+    render_confidence_chart()
+
+    st.divider()
+    render_walk_forward(df, feature_cols)
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: HEATMAPS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -724,7 +927,6 @@ elif "📅" in page:
     st.pyplot(fig); plt.close()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Live Nifty chart embed
     st.divider()
     st.markdown('<p class="sec-label">Live Chart</p>', unsafe_allow_html=True)
     st.markdown('<p class="sec-title">Nifty50 Live Chart</p>', unsafe_allow_html=True)
@@ -734,21 +936,20 @@ elif "📅" in page:
       <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
       <script type="text/javascript">
       new TradingView.widget({
-        "width": "100%", "height": 450,
-        "symbol": "NSE:NIFTY",
-        "interval": "5",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "style": "1",
-        "locale": "en",
-        "toolbar_bg": "#0d1117",
-        "enable_publishing": false,
-        "hide_top_toolbar": false,
-        "hide_legend": false,
-        "container_id": "tradingview_nifty"
+        "width": "100%", "height": 450, "symbol": "NSE:NIFTY",
+        "interval": "5", "timezone": "Asia/Kolkata", "theme": "dark",
+        "style": "1", "locale": "en", "toolbar_bg": "#0d1117",
+        "enable_publishing": false, "hide_top_toolbar": false,
+        "hide_legend": false, "container_id": "tradingview_nifty"
       });
       </script>
     </div>""", height=460)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: MULTI-INDEX
+# ══════════════════════════════════════════════════════════════════════════════
+elif "📈" in page:
+    render_multi_index()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: HISTORY
@@ -805,13 +1006,10 @@ elif "⚙️" in page:
     st.markdown('<p class="sec-label">Settings</p>', unsafe_allow_html=True)
     st.markdown('<p class="sec-title">Settings & Model Retraining</p>', unsafe_allow_html=True)
 
-    # Model info
-    st.markdown('<p class="sec-label" style="margin-top:1rem;">Current Model Status</p>', unsafe_allow_html=True)
     si1,si2,si3,si4 = st.columns(4)
     si1.metric("Model Type",    "Ensemble" if USE_V2 else "XGBoost")
     si2.metric("Features",      f"{len(feature_cols)}")
     si3.metric("Test Accuracy", f"{acc*100:.1f}%")
-
     if os.path.exists(MODEL_PATH):
         mtime = os.path.getmtime(MODEL_PATH)
         last_train = datetime.fromtimestamp(mtime).strftime("%d %b %Y")
@@ -823,26 +1021,15 @@ elif "⚙️" in page:
     st.markdown('<p class="sec-label">One-Click Retrain</p>', unsafe_allow_html=True)
     st.markdown('<p class="sec-title">Retrain All Models</p>', unsafe_allow_html=True)
 
-    # Detect if running on Streamlit Cloud
     is_cloud = os.environ.get("STREAMLIT_SHARING_MODE") or not os.path.exists("data_fetch.py")
 
     if is_cloud:
         st.info("""
         ☁️ **Running on Streamlit Cloud**
-
-        Retraining requires a local Python environment. To retrain the model:
-
-        1. Clone the repo to your local machine
-        2. Run these commands in order:
-        ```
-        python data_fetch.py
-        python features_v2.py
-        python ensemble_model.py
-        python regime_detector.py
-        python explainer.py
-        ```
-        3. Push the new model files to GitHub
-        4. Streamlit Cloud will auto-redeploy
+        Retraining requires a local Python environment. To retrain:
+        1. Clone the repo locally
+        2. Run: `python data_fetch.py` → `python features_v2.py` → `python ensemble_model.py` → `python regime_detector.py` → `python explainer.py`
+        3. Push new model files to GitHub — Streamlit Cloud will auto-redeploy.
         """)
     else:
         st.warning("⚠️ Retraining fetches fresh data and rebuilds all models. Takes 5–10 minutes.")
@@ -850,12 +1037,12 @@ elif "⚙️" in page:
             progress = st.progress(0)
             status   = st.empty()
             steps = [
-                ("Fetching fresh market data...",      "python data_fetch.py",       20),
-                ("Preprocessing data...",              "python data_preprocess.py",  40),
-                ("Building V2 features...",            "python features_v2.py",      60),
-                ("Training ensemble models...",        "python ensemble_model.py",   80),
-                ("Running regime detection...",        "python regime_detector.py",  90),
-                ("Building SHAP explanations...",      "python explainer.py",        100),
+                ("Fetching fresh market data...",  "python data_fetch.py",      20),
+                ("Preprocessing data...",          "python data_preprocess.py", 40),
+                ("Building V2 features...",        "python features_v2.py",     60),
+                ("Training ensemble models...",    "python ensemble_model.py",  80),
+                ("Running regime detection...",    "python regime_detector.py", 90),
+                ("Building SHAP explanations...",  "python explainer.py",       100),
             ]
             success = True
             for msg, cmd, pct in steps:
@@ -868,7 +1055,6 @@ elif "⚙️" in page:
                 except Exception as e:
                     st.error(f"Failed: {e}"); success = False; break
                 progress.progress(pct)
-
             if success:
                 status.success("✅ Retraining complete! Refresh the page to use the new model.")
                 st.cache_resource.clear(); st.cache_data.clear()

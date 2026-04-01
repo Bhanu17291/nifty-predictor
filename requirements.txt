@@ -10,3 +10,22 @@ yfinance>=0.2.0
 shap>=0.42.0
 reportlab>=4.0.0
 pillow>=10.0.0
+newsapi-python
+vaderSentiment
+python-telegram-bot
+apscheduler
+python-dotenv
+gTTS
+requests
+```
+
+### `.gitignore` — add these lines
+```
+.streamlit/secrets.toml
+.env
+data/predictions.json
+data/drift_log.csv
+data/user_prefs.json
+models/calibrated_ensemble.pkl
+__pycache__/
+*.pyc

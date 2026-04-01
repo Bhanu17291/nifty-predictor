@@ -12,6 +12,10 @@ Changes from original:
 
   [Step 8c] Loads optimised threshold from optimal_weights.pkl (Step 7)
             Falls back to 0.50 if file not found
+
+  [Feature alignment] align_features() added — ensures X_live columns
+            exactly match what each model was trained on, preventing
+            the ValueError: feature_names mismatch crash.
 """
 
 import yfinance as yf
@@ -28,7 +32,6 @@ TICKERS = {
     "sp500"      : "^GSPC",
     "nasdaq"     : "^IXIC",
     "nifty"      : "^NSEI",
-    # Step 1 fix carried through — NIFTYBEES.NS not ^NSEI
     "gift_nifty" : "NIFTYBEES.NS",
     "vix_india"  : "^INDIAVIX",
     "usdinr"     : "INR=X",
@@ -67,7 +70,6 @@ def load_optimal_weights() -> dict:
         with open(path, "rb") as f:
             data = pickle.load(f)
         return data
-    # Fallback to default weights
     return {
         "global_weights" : {"xgb": 0.40, "lgbm": 0.40, "rf": 0.20},
         "regime_weights" : {
@@ -79,20 +81,10 @@ def load_optimal_weights() -> dict:
     }
 
 
-# ── STEP 8a — Load training medians ──────────────────────────────────────────
 def load_training_medians(feature_cols: list) -> pd.Series:
     """
     STEP 8a FIX — Load median of each feature from training data.
-
-    When a live feature is missing (API down, market closed, new column),
-    we fill with the training median instead of 0.0.
-
-    Why median not mean:
-      Return distributions are fat-tailed. Mean is pulled by outliers.
-      Median is the true "average day" for financial return features.
-
-    Saves medians to data/training_medians.pkl on first run,
-    reloads from cache on subsequent runs.
+    Fills missing features with statistically neutral values instead of 0.0.
     """
     cache_path = os.path.join(DATA_DIR, "training_medians.pkl")
 
@@ -101,7 +93,6 @@ def load_training_medians(feature_cols: list) -> pd.Series:
             medians = pickle.load(f)
         return medians
 
-    # Compute from training data if cache doesn't exist
     train_path = os.path.join(DATA_DIR, "train_v2.csv")
     if os.path.exists(train_path):
         train_df = pd.read_csv(train_path, index_col=0, parse_dates=True)
@@ -112,9 +103,56 @@ def load_training_medians(feature_cols: list) -> pd.Series:
         print(f"  💾 Training medians cached → {cache_path}")
         return medians
 
-    # Last resort: return zeros (same as before, but now explicit)
     print("  ⚠️  Could not load training data for medians — using 0.0 fallback")
     return pd.Series({col: 0.0 for col in feature_cols})
+
+
+# ── Feature alignment ─────────────────────────────────────────────────────────
+def get_model_features(model) -> list | None:
+    """
+    Extract the exact feature list a trained model expects.
+    Supports XGBoost (get_booster().feature_names) and
+    sklearn-style models (feature_names_in_).
+    Returns None if the model stores no feature list.
+    """
+    try:
+        names = model.get_booster().feature_names
+        if names:
+            return list(names)
+    except Exception:
+        pass
+    try:
+        names = model.feature_names_in_
+        if names is not None:
+            return list(names)
+    except Exception:
+        pass
+    return None
+
+
+def align_features(model, X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reorder and/or fill X so it exactly matches what `model` was trained on.
+    Prevents ValueError: feature_names mismatch at predict time.
+
+    Three cases:
+      1. Model has no stored feature names  → return X unchanged
+      2. X has right columns in wrong order → reorder to match training order
+      3. X is missing some columns          → fill missing with 0.0 and warn
+    """
+    expected = get_model_features(model)
+    if expected is None:
+        return X
+
+    missing = [c for c in expected if c not in X.columns]
+    if missing:
+        print(f"  ⚠️  align_features: {len(missing)} cols missing, filled 0: "
+              f"{missing[:5]}{'...' if len(missing) > 5 else ''}")
+
+    X_aligned = X.copy()
+    for col in missing:
+        X_aligned[col] = 0.0
+    return X_aligned[expected]
 
 
 def fetch_live(days_back: int = 120) -> pd.DataFrame:
@@ -176,8 +214,6 @@ def predict_tomorrow_v2(verbose: bool = True) -> dict:
     latest_date = latest.index[0]
 
     # ── STEP 8a FIX — Fill missing features with training medians ─────────────
-    # WAS: X_live[col] = 0.0  ← implied "flat market" for ALL missing features
-    # NOW: X_live[col] = training_medians[col]  ← statistically neutral value
     medians = load_training_medians(feature_cols)
     X_live  = pd.DataFrame(index=latest.index, columns=feature_cols, dtype=float)
 
@@ -196,16 +232,15 @@ def predict_tomorrow_v2(verbose: bool = True) -> dict:
 
     X_live = X_live.astype(float)
 
-    # ── Load optimised weights and threshold (Step 7) ─────────────────────────
+    # ── Load optimised weights and threshold ──────────────────────────────────
     opt_data  = load_optimal_weights()
     threshold = opt_data.get("best_threshold", 0.50)
 
-    # Detect regime and use regime-specific weights
+    # Detect regime
     try:
         from regime_detector import detect_regime
         regime_info    = detect_regime(closes.dropna(subset=["nifty"]))
         regime         = regime_info["regime"]
-        # STEP 8b — use optimised regime weights if available, else fall back
         regime_weights = opt_data.get("regime_weights", {})
         weights        = regime_weights.get(regime, opt_data["global_weights"])
     except Exception:
@@ -215,18 +250,18 @@ def predict_tomorrow_v2(verbose: bool = True) -> dict:
         weights     = opt_data["global_weights"]
         regime      = "FLAT"
 
-    # Ensemble predict
-    p_xgb  = float(models["xgb"].predict_proba(X_live)[0][1])
-    p_lgbm = float(models["lgbm"].predict_proba(X_live)[0][1]) if "lgbm" in models else p_xgb
-    p_rf   = float(models["rf"].predict_proba(X_live)[0][1])   if "rf"   in models else p_xgb
+    # ── Ensemble predict with feature alignment ───────────────────────────────
+    # align_features ensures each model receives exactly the columns it was
+    # trained on, in the correct order — fixes the ValueError at prediction time.
+    p_xgb  = float(models["xgb"].predict_proba(align_features(models["xgb"],   X_live))[0][1])
+    p_lgbm = float(models["lgbm"].predict_proba(align_features(models["lgbm"], X_live))[0][1]) if "lgbm" in models else p_xgb
+    p_rf   = float(models["rf"].predict_proba(align_features(models["rf"],     X_live))[0][1]) if "rf"   in models else p_xgb
 
     up_prob = (p_xgb  * weights["xgb"]  +
                p_lgbm * weights["lgbm"] +
                p_rf   * weights["rf"]) * 100
 
     down_prob  = 100 - up_prob
-
-    # STEP 8c — use optimised threshold, not hardcoded 0.50
     pred_int   = 1 if (up_prob / 100) >= threshold else 0
     confidence = up_prob if pred_int == 1 else down_prob
     tier_info  = confidence_tier(confidence)
@@ -246,27 +281,27 @@ def predict_tomorrow_v2(verbose: bool = True) -> dict:
         pass
 
     result = {
-        "prediction"   : "UP 🟢" if pred_int == 1 else "DOWN 🔴",
-        "pred_int"     : pred_int,
-        "up_prob"      : round(up_prob, 1),
-        "down_prob"    : round(down_prob, 1),
-        "confidence"   : round(confidence, 1),
-        "tier"         : tier_info["tier"],
-        "tier_label"   : tier_info["label"],
-        "tier_emoji"   : tier_info["emoji"],
-        "regime"       : regime_info["regime"],
-        "regime_emoji" : regime_info.get("emoji", "🔵"),
-        "regime_desc"  : regime_info.get("description", ""),
-        "as_of_date"   : latest_date.strftime("%d %b %Y"),
-        "sp500_ret"    : round(safe_ret("sp500"),  2),
-        "nasdaq_ret"   : round(safe_ret("nasdaq"), 2),
-        "nifty_ret"    : round(safe_ret("nifty"),  2),
-        "crude_ret"    : round(safe_ret("crude"),  2),
-        "usdinr_ret"   : round(safe_ret("usdinr"), 2),
-        "vix"          : round(float(closes["vix_india"].dropna().iloc[-1]), 2)
-                         if "vix_india" in closes.columns else None,
-        "explanation"  : explanation,
-        "weights_used" : weights,
+        "prediction"    : "UP 🟢" if pred_int == 1 else "DOWN 🔴",
+        "pred_int"      : pred_int,
+        "up_prob"       : round(up_prob, 1),
+        "down_prob"     : round(down_prob, 1),
+        "confidence"    : round(confidence, 1),
+        "tier"          : tier_info["tier"],
+        "tier_label"    : tier_info["label"],
+        "tier_emoji"    : tier_info["emoji"],
+        "regime"        : regime_info["regime"],
+        "regime_emoji"  : regime_info.get("emoji", "🔵"),
+        "regime_desc"   : regime_info.get("description", ""),
+        "as_of_date"    : latest_date.strftime("%d %b %Y"),
+        "sp500_ret"     : round(safe_ret("sp500"),  2),
+        "nasdaq_ret"    : round(safe_ret("nasdaq"), 2),
+        "nifty_ret"     : round(safe_ret("nifty"),  2),
+        "crude_ret"     : round(safe_ret("crude"),  2),
+        "usdinr_ret"    : round(safe_ret("usdinr"), 2),
+        "vix"           : round(float(closes["vix_india"].dropna().iloc[-1]), 2)
+                          if "vix_india" in closes.columns else None,
+        "explanation"   : explanation,
+        "weights_used"  : weights,
         "threshold_used": threshold,
         "missing_features": len(missing_cols),
     }

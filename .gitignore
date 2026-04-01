@@ -32,3 +32,9 @@ Thumbs.db
 
 # VS Code
 .vscode/
+
+.env
+data/predictions.json
+data/drift_log.csv
+data/user_prefs.json
+models/calibrated_ensemble.pkl
