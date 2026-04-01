@@ -501,141 +501,228 @@ st.markdown(f"""
 # PAGE: LIVE PREDICTION
 # ══════════════════════════════════════════════════════════════════════════════
 if "🏠" in page:
-    st.markdown('<p class="sec-label">Live Signal</p>', unsafe_allow_html=True)
-    st.markdown("<p class=\"sec-title\">Tomorrow's Opening Prediction</p>", unsafe_allow_html=True)
-
-    render_heatmap()
-    st.divider()
-
+    # ── Scorecard bar ────────────────────────────────────────────────────────
     score = get_scorecard(30)
     if score["total"] > 0:
         sc1, sc2, sc3 = st.columns(3)
         sc1.metric("30-day accuracy", f"{score['accuracy']:.1%}")
         sc2.metric("Correct calls",   score["correct"])
         sc3.metric("Total tracked",   score["total"])
-        st.divider()
 
-    col_btn, col_main, col_gauge = st.columns([1,2,1], gap="large")
+    st.markdown("""
+    <style>
+    .dashboard-grid{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto;gap:1rem;margin-bottom:1rem;}
+    .dash-card{background:rgba(15,23,42,.85);border:1px solid rgba(99,179,237,.2);border-radius:16px;padding:1.4rem 1.6rem;}
+    .dash-card-wide{background:rgba(15,23,42,.85);border:1px solid rgba(99,179,237,.2);border-radius:16px;padding:1.4rem 1.6rem;grid-column:span 2;}
+    .dash-card-full{background:rgba(15,23,42,.85);border:1px solid rgba(99,179,237,.2);border-radius:16px;padding:1.4rem 1.6rem;grid-column:span 3;}
+    .card-label{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#60a5fa;text-transform:uppercase;letter-spacing:.15em;margin-bottom:.5rem;}
+    .signal-big{font-family:'Playfair Display',serif;font-size:2.8rem;font-weight:800;letter-spacing:-.03em;margin:0;}
+    .conf-num{font-family:'Playfair Display',serif;font-size:2.4rem;font-weight:700;margin:0;}
+    .ticker-mini{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.4rem;}
+    .tmini{background:rgba(30,41,59,.7);border:1px solid rgba(99,179,237,.15);border-radius:8px;padding:.4rem .7rem;text-align:center;flex:1;min-width:70px;}
+    .tmini-label{font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:#475569;text-transform:uppercase;}
+    .tmini-val{font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:700;}
+    .reason-row{display:flex;align-items:center;gap:.6rem;padding:.45rem 0;border-bottom:1px solid rgba(99,179,237,.08);}
+    .reason-row:last-child{border-bottom:none;}
+    .reason-badge{font-family:'IBM Plex Mono',monospace;font-size:.75rem;padding:.2rem .55rem;border-radius:6px;font-weight:600;}
+    .badge-up{background:rgba(20,83,45,.4);color:#22c55e;}
+    .badge-dn{background:rgba(127,29,29,.4);color:#ef4444;}
+    .reason-text{font-family:'IBM Plex Sans',sans-serif;font-size:.92rem;color:#cbd5e1;}
+    .commentary-mini{font-family:'IBM Plex Sans',sans-serif;font-size:.95rem;color:#94a3b8;line-height:1.7;}
+    .target-val{font-family:'Playfair Display',serif;font-size:2rem;font-weight:700;color:#60a5fa;margin:0;}
+    .target-range{font-family:'IBM Plex Mono',monospace;font-size:.82rem;color:#64748b;margin:.3rem 0 0;}
+    </style>
+    """, unsafe_allow_html=True)
 
+    # ── Generate button ───────────────────────────────────────────────────────
+    col_btn, col_time = st.columns([1, 3])
     with col_btn:
-        st.button("⚡ Generate Prediction", type="primary", use_container_width=True, key="predict_btn")
+        st.button("⚡ Generate Prediction", type="primary",
+                  use_container_width=True, key="predict_btn")
+    with col_time:
         st.markdown("""
-        <div class="hint-block">
-            <p class="hint-title">Optimal Timing</p>
-            <p class="hint-body">▸ After 11 PM IST<br>▸ US markets closed<br>▸ Before 9 AM NSE open</p>
+        <div style='padding:.6rem 1rem;background:rgba(30,58,138,.2);border:1px solid rgba(99,179,237,.2);
+                    border-radius:10px;font-family:IBM Plex Mono,monospace;font-size:.8rem;color:#60a5fa;'>
+            ⏰ Best used after 11 PM IST &nbsp;·&nbsp; US markets closed &nbsp;·&nbsp; Before 9 AM NSE open
         </div>""", unsafe_allow_html=True)
 
-    with col_main:
-        if st.session_state.get("predict_btn"):
-            with st.spinner("Fetching live data & running ensemble..."):
-                try:
-                    if USE_V2:
-                        from live_predict_v2 import predict_tomorrow_v2
-                        r = predict_tomorrow_v2(verbose=False)
-                    else:
-                        from live_predict import predict_tomorrow
-                        r = predict_tomorrow(verbose=False)
+    if st.session_state.get("predict_btn"):
+        with st.spinner("Fetching live data & running ensemble..."):
+            try:
+                if USE_V2:
+                    from live_predict_v2 import predict_tomorrow_v2
+                    r = predict_tomorrow_v2(verbose=False)
+                else:
+                    from live_predict import predict_tomorrow
+                    r = predict_tomorrow(verbose=False)
 
-                    st.session_state["last_result"] = r
-                    add_to_history(r)
-                    commentary = generate_commentary(r)
-                    st.session_state["commentary"] = commentary
+                st.session_state["last_result"] = r
+                add_to_history(r)
+                commentary  = generate_commentary(r)
+                st.session_state["commentary"] = commentary
 
-                    pred_direction  = "UP" if r["pred_int"] == 1 else "DOWN"
-                    pred_confidence = r["confidence"] / 100
-                    log_prediction(pred_direction, pred_confidence)
+                pred_direction  = "UP" if r["pred_int"] == 1 else "DOWN"
+                pred_confidence = r["confidence"] / 100
+                log_prediction(pred_direction, pred_confidence)
 
-                    reg     = r.get("regime","")
-                    reg_cls = f"regime-{reg.lower()}" if reg in ["BULL","BEAR","FLAT"] else "regime-flat"
-                    tier_cls= f"tier-{r.get('tier','moderate').lower()}"
+                current_vix = r["vix"] if r.get("vix") else 15.0
+                signal      = compute_signal(confidence=pred_confidence, vix=current_vix)
+                mag         = r.get("magnitude", {})
 
-                    st.markdown(f"""
-                    <span class="regime-badge {reg_cls}">{r.get('regime_emoji','')} {reg} REGIME</span>
-                    &nbsp;
-                    <span class="regime-badge {tier_cls}">{r.get('tier_emoji','')} {r.get('tier_label','')}</span>
-                    """, unsafe_allow_html=True)
+                # ── helpers ──────────────────────────────────────────────────
+                def vc(v): return "up-val" if v > 0 else "down-val" if v < 0 else "neu-val"
+                def ar(v): return "▲" if v > 0 else "▼" if v < 0 else "—"
 
-                    if r["pred_int"]==1:
-                        st.markdown(f"""<div class="signal-up">
-                            <p class="signal-title up-text">🟢 Bullish Open Expected</p>
-                            <p class="signal-sub">Nifty50 predicted to open <strong>higher</strong> — {r['as_of_date']}</p>
-                        </div>""", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""<div class="signal-down">
-                            <p class="signal-title down-text">🔴 Bearish Open Expected</p>
-                            <p class="signal-sub">Nifty50 predicted to open <strong>lower</strong> — {r['as_of_date']}</p>
-                        </div>""", unsafe_allow_html=True)
+                is_up       = r["pred_int"] == 1
+                sig_color   = "#22c55e" if is_up else "#ef4444"
+                sig_label   = "🟢 Bullish Open" if is_up else "🔴 Bearish Open"
+                sig_sub     = "Nifty expected to open HIGHER" if is_up else "Nifty expected to open LOWER"
+                conf_color  = "#22c55e" if pred_confidence >= .65 else "#f97316" if pred_confidence >= .55 else "#ef4444"
 
-                    def vc(v): return "up-val" if v>0 else "down-val" if v<0 else "neu-val"
-                    def ar(v): return "▲" if v>0 else "▼" if v<0 else "—"
-                    vix_html = f'<div class="ticker-card"><div class="ticker-label">VIX</div><div class="ticker-value neu-val">{r["vix"]}</div></div>' if r.get("vix") else ""
-                    st.markdown(f"""
-                    <div class="ticker-row">
-                        <div class="ticker-card"><div class="ticker-label">S&P 500</div><div class="ticker-value {vc(r['sp500_ret'])}">{ar(r['sp500_ret'])} {r['sp500_ret']:+.2f}%</div></div>
-                        <div class="ticker-card"><div class="ticker-label">Nasdaq</div><div class="ticker-value {vc(r['nasdaq_ret'])}">{ar(r['nasdaq_ret'])} {r['nasdaq_ret']:+.2f}%</div></div>
-                        <div class="ticker-card"><div class="ticker-label">Nifty</div><div class="ticker-value {vc(r['nifty_ret'])}">{ar(r['nifty_ret'])} {r['nifty_ret']:+.2f}%</div></div>
-                        <div class="ticker-card"><div class="ticker-label">Crude</div><div class="ticker-value {vc(r.get('crude_ret',0))}">{ar(r.get('crude_ret',0))} {r.get('crude_ret',0):+.2f}%</div></div>
-                        <div class="ticker-card"><div class="ticker-label">USD/INR</div><div class="ticker-value {vc(r.get('usdinr_ret',0))}">{ar(r.get('usdinr_ret',0))} {r.get('usdinr_ret',0):+.2f}%</div></div>
-                        {vix_html}
-                    </div>""", unsafe_allow_html=True)
+                # SHAP reasons
+                shap_top = []
+                if r.get("explanation", {}).get("available"):
+                    for reason in r["explanation"].get("reasons", [])[:4]:
+                        if isinstance(reason, dict):
+                            shap_top.append((reason.get("feature",""), reason.get("shap",0), reason.get("strength",0)))
 
-                    fig,ax=plt.subplots(figsize=(9,.8)); fig.patch.set_facecolor("#0d1117"); ax.set_facecolor("#0d1117")
-                    ax.barh(0,r["up_prob"]/100,color="#22c55e",height=.55)
-                    ax.barh(0,r["down_prob"]/100,left=r["up_prob"]/100,color="#ef4444",height=.55)
-                    ax.axvline(.5,color="#0d1117",linewidth=2.5); ax.set_xlim(0,1); ax.set_yticks([])
-                    ax.set_xticks([0,.25,.5,.75,1]); ax.set_xticklabels(["0%","25%","50%","75%","100%"],fontsize=8,color="#64748b")
-                    for s in ax.spines.values(): s.set_visible(False)
-                    plt.tight_layout(pad=.2); st.pyplot(fig); plt.close()
+                live_data = {
+                    "SP500_return"     : r["sp500_ret"],
+                    "Nasdaq_return"    : r["nasdaq_ret"],
+                    "India_VIX"        : current_vix,
+                    "USDINR_return"    : r.get("usdinr_ret", 0),
+                    "Crude_return"     : r.get("crude_ret", 0),
+                    "GIFT_Nifty_return": r["nifty_ret"],
+                }
+                reasons_text = generate_reasoning(
+                    [(f, s) for f, s, _ in shap_top], live_data, pred_direction
+                )
+                if not reasons_text:
+                    reasons_text = [
+                        f"S&P 500 closed {r['sp500_ret']:+.2f}% overnight.",
+                        f"Nasdaq closed {r['nasdaq_ret']:+.2f}% overnight.",
+                        f"India VIX is at {current_vix:.1f}.",
+                        f"USD/INR moved {r.get('usdinr_ret',0):+.2f}%.",
+                    ]
 
-                    # ── Signal score ──
-                    st.divider()
-                    current_vix = r["vix"] if r.get("vix") else 15.0
-                    signal = compute_signal(confidence=pred_confidence, vix=current_vix)
-                    sig1, sig2, sig3 = st.columns(3)
-                    sig1.metric("Signal tier",    signal["label"])
-                    sig2.metric("Adjusted score", f"{signal['score']:.1%}")
-                    sig3.metric("VIX penalty",    f"-{signal['vix_penalty']:.0%}" if signal["vix_penalty"] else "None")
-                    if signal["is_expiry"]:
-                        st.warning("Today is F&O expiry — expect elevated volatility.")
-                    if signal["days_to_event"] <= 2:
-                        st.warning(f"Major market event in {signal['days_to_event']} day(s) — signal reliability reduced.")
+                # target price strings
+                if mag.get("available"):
+                    target_str = f"₹{mag['pred_price']:,.0f}"
+                    range_str  = f"₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}"
+                    ret_str    = f"{mag['predicted_ret']:+.2f}%"
+                    ret_color  = "#22c55e" if mag["predicted_ret"] > 0 else "#ef4444"
+                else:
+                    target_str = "N/A"
+                    range_str  = "Run prediction to calculate"
+                    ret_str    = "—"
+                    ret_color  = "#64748b"
 
-                    # ── Target price ──
-                    st.divider()
-                    st.markdown('<p class="sec-label">Expected Open Range</p>', unsafe_allow_html=True)
-                    mag = r.get("magnitude", {})
-                    if mag.get("available"):
-                        mp1, mp2, mp3 = st.columns(3)
-                        mp1.metric("Predicted return", f"{mag['predicted_ret']:+.2f}%")
-                        mp2.metric("Target open",      f"₹{mag['pred_price']:,.0f}")
-                        mp3.metric("Range",            f"₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}")
-                        color_m = "#22c55e" if mag["predicted_ret"] > 0 else "#ef4444"
-                        st.markdown(f"""
-                        <div style='background:rgba(15,23,42,.7);border:1px solid rgba(99,179,237,.15);
-                                    border-left:4px solid {color_m};border-radius:10px;padding:1rem 1.4rem;'>
-                            <p style='font-family:IBM Plex Sans,sans-serif;font-size:1rem;color:#cbd5e1;margin:0;'>
-                            Nifty is expected to open around
-                            <strong style='color:{color_m};'>₹{mag['pred_price']:,.0f}</strong>
-                            ({mag['predicted_ret']:+.2f}%), with a probable range of
-                            <strong>₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}</strong>.
-                            Treat as a zone, not a precise level.
-                            </p>
-                        </div>""", unsafe_allow_html=True)
-                    else:
-                        try:
-                            import yfinance as _yf
-                            _np = float(_yf.download("^NSEI", period="2d", interval="1d", progress=False)["Close"].iloc[-1])
-                            mag_model, mag_scaler = load_magnitude_model()
-                            if mag_model is None:
-                                mag_model, mag_scaler = train_magnitude_model(df, feature_cols)
-                            if mag_model is not None:
-                                render_target_price(X_test.tail(1), _np, df, feature_cols)
-                        except Exception:
-                            st.info("Target price unavailable — market data not fetched yet.")
+                vix_html = f'<div class="tmini"><div class="tmini-label">VIX</div><div class="tmini-val neu-val">{r["vix"]}</div></div>' if r.get("vix") else ""
 
-                    # ── Options strategy recommender ──
-                    st.divider()
-                    opts_strat = r.get("options_strategy")
+                reasons_html = ""
+                for rt in reasons_text[:4]:
+                    reasons_html += f'''
+                    <div class="reason-row">
+                        <span class="reason-badge {'badge-up' if is_up else 'badge-dn'}">
+                            {'▲' if is_up else '▼'}
+                        </span>
+                        <span class="reason-text">{rt}</span>
+                    </div>'''
+
+                # ── MAIN DASHBOARD GRID ───────────────────────────────────────
+                st.markdown(f"""
+                <div class="dashboard-grid">
+
+                  <!-- CARD 1: Signal -->
+                  <div class="dash-card" style="border-top:3px solid {sig_color};">
+                    <div class="card-label">Signal</div>
+                    <p class="signal-big" style="color:{sig_color};">{sig_label}</p>
+                    <p style="font-family:'IBM Plex Sans',sans-serif;font-size:.88rem;
+                               color:#64748b;margin:.3rem 0 0;">{sig_sub}</p>
+                    <p style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;
+                               color:#475569;margin:.6rem 0 0;">📅 {r['as_of_date']}</p>
+                  </div>
+
+                  <!-- CARD 2: Confidence -->
+                  <div class="dash-card" style="border-top:3px solid {conf_color};">
+                    <div class="card-label">Confidence</div>
+                    <p class="conf-num" style="color:{conf_color};">{r['confidence']:.1f}%</p>
+                    <div style="margin:.6rem 0 .3rem;background:rgba(30,41,59,.8);
+                                border-radius:6px;height:8px;overflow:hidden;">
+                      <div style="width:{r['up_prob']}%;height:100%;
+                                  background:linear-gradient(90deg,#22c55e,#16a34a);border-radius:6px;"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;
+                                font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#64748b;">
+                      <span>🟢 UP {r['up_prob']}%</span>
+                      <span>🔴 DN {r['down_prob']}%</span>
+                    </div>
+                    <div style="margin-top:.6rem;">
+                      <span class="regime-badge {'regime-bull' if r.get('regime')=='BULL' else 'regime-bear' if r.get('regime')=='BEAR' else 'regime-flat'}">
+                        {r.get('regime_emoji','')} {r.get('regime','N/A')}
+                      </span>
+                      &nbsp;
+                      <span class="regime-badge tier-{r.get('tier','moderate').lower()}">
+                        {r.get('tier_emoji','')} {r.get('tier_label','')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- CARD 3: Target Price -->
+                  <div class="dash-card" style="border-top:3px solid #3b82f6;">
+                    <div class="card-label">Target Open Price</div>
+                    <p class="target-val">{target_str}
+                      <span style="font-size:1rem;color:{ret_color};"> {ret_str}</span>
+                    </p>
+                    <p class="target-range">Range: {range_str}</p>
+                    <div style="margin-top:.8rem;font-family:'IBM Plex Mono',monospace;
+                                font-size:.75rem;color:#475569;">
+                      Signal Score: <strong style="color:#e2e8f0;">{signal['score']:.0%}</strong>
+                      &nbsp;·&nbsp; Tier: <strong style="color:#e2e8f0;">{signal['label']}</strong>
+                    </div>
+                  </div>
+
+                  <!-- CARD 4: Tickers (wide) -->
+                  <div class="dash-card-wide" style="border-top:3px solid #1e3a8a;">
+                    <div class="card-label">Market Signals</div>
+                    <div class="ticker-mini">
+                      <div class="tmini"><div class="tmini-label">S&P 500</div>
+                        <div class="tmini-val {vc(r['sp500_ret'])}">{ar(r['sp500_ret'])} {r['sp500_ret']:+.2f}%</div></div>
+                      <div class="tmini"><div class="tmini-label">Nasdaq</div>
+                        <div class="tmini-val {vc(r['nasdaq_ret'])}">{ar(r['nasdaq_ret'])} {r['nasdaq_ret']:+.2f}%</div></div>
+                      <div class="tmini"><div class="tmini-label">GIFT Nifty</div>
+                        <div class="tmini-val {vc(r['nifty_ret'])}">{ar(r['nifty_ret'])} {r['nifty_ret']:+.2f}%</div></div>
+                      <div class="tmini"><div class="tmini-label">Crude Oil</div>
+                        <div class="tmini-val {vc(r.get('crude_ret',0))}">{ar(r.get('crude_ret',0))} {r.get('crude_ret',0):+.2f}%</div></div>
+                      <div class="tmini"><div class="tmini-label">USD/INR</div>
+                        <div class="tmini-val {vc(r.get('usdinr_ret',0))}">{ar(r.get('usdinr_ret',0))} {r.get('usdinr_ret',0):+.2f}%</div></div>
+                      {vix_html}
+                    </div>
+                  </div>
+
+                  <!-- CARD 5: Why -->
+                  <div class="dash-card" style="border-top:3px solid #7c3aed;">
+                    <div class="card-label">Why This Prediction</div>
+                    {reasons_html}
+                  </div>
+
+                  <!-- CARD 6: Commentary (full width) -->
+                  <div class="dash-card-full" style="border-top:3px solid #0891b2;">
+                    <div class="card-label">🤖 AI Commentary</div>
+                    <p class="commentary-mini">{commentary}</p>
+                  </div>
+
+                </div>
+                """, unsafe_allow_html=True)
+
+                # ── EXPANDABLE TABS for secondary content ─────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                    "📊 Options", "📈 FII/DII", "🎯 SHAP Details",
+                    "🔊 Voice", "📰 Sentiment", "📋 Watchlist"
+                ])
+
+                with tab1:
                     pcr_val = 1.0
                     try:
                         from options_signals import fetch_options_data
@@ -644,110 +731,75 @@ if "🏠" in page:
                             pcr_val = opts_data["pcr"]
                     except Exception:
                         pass
+                    render_options_signals()
+                    st.divider()
                     render_options_recommender(
-                        direction    = pred_direction,
-                        signal_label = signal["label"],
-                        vix          = current_vix,
-                        pcr          = pcr_val,
-                        current_price= mag.get("current_price", 22000)
+                        direction     = pred_direction,
+                        signal_label  = signal["label"],
+                        vix           = current_vix,
+                        pcr           = pcr_val,
+                        current_price = mag.get("current_price", 22000)
                     )
 
-                    # ── Plain English reasoning ──
-                    st.divider()
-                    st.markdown('<p class="sec-label">Why this prediction</p>', unsafe_allow_html=True)
-                    shap_top_features = []
-                    if r.get("explanation", {}).get("available"):
-                        reasons_raw = r["explanation"].get("reasons", [])
-                        for reason in reasons_raw[:3]:
-                            if isinstance(reason, dict):
-                                shap_top_features.append((reason.get("feature",""), reason.get("shap", 0)))
-                            elif isinstance(reason, str):
-                                try:
-                                    parts = reason.split(":")
-                                    shap_top_features.append((parts[0].strip(), float(parts[1].strip())))
-                                except Exception:
-                                    pass
-                    live_data = {
-                        "SP500_return"     : r["sp500_ret"],
-                        "Nasdaq_return"    : r["nasdaq_ret"],
-                        "India_VIX"        : current_vix,
-                        "USDINR_return"    : r.get("usdinr_ret", 0),
-                        "Crude_return"     : r.get("crude_ret", 0),
-                        "GIFT_Nifty_return": r["nifty_ret"],
-                    }
-                    reasons = generate_reasoning(shap_top_features, live_data, pred_direction)
-                    if reasons:
-                        for reason_text in reasons:
-                            st.markdown(f"- {reason_text}")
-                    else:
-                        st.markdown(f"- S&P 500 closed {r['sp500_ret']:+.2f}% overnight.")
-                        st.markdown(f"- Nasdaq closed {r['nasdaq_ret']:+.2f}% overnight.")
-                        st.markdown(f"- India VIX is at {current_vix:.1f}.")
-                        st.markdown(f"- USD/INR moved {r.get('usdinr_ret',0):+.2f}%.")
-
-                    # ── AI Commentary ──
-                    st.divider()
-                    st.markdown('<p class="sec-label">AI Market Commentary</p>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="commentary-card"><p class="commentary-text">🤖 {commentary}</p></div>', unsafe_allow_html=True)
-
-                    if r.get("explanation",{}).get("available"):
-                        st.markdown("**Top SHAP drivers:**")
-                        for i,reason in enumerate(r["explanation"]["reasons"][:5],1):
-                            if isinstance(reason, dict):
-                                arrow="🟢 ▲" if reason["shap"]>0 else "🔴 ▼"
-                                st.markdown(f"`{i}. {reason['feature'][:28]:<28}` {arrow} strength **{reason['strength']:.4f}**")
-
-                    # ── Voice briefing ──
-                    st.divider()
-                    render_voice_briefing(commentary)
-
-                    # ── Options signals ──
-                    st.divider()
-                    render_options_signals()
-
-                    # ── FII/DII ──
-                    st.divider()
+                with tab2:
                     render_fii_dii()
 
-                    # ── PDF ──
-                    pdf_bytes = generate_pdf_report(r, commentary)
-                    if pdf_bytes:
-                        st.download_button("📄 Download Morning Brief PDF",
-                                           data=pdf_bytes,
-                                           file_name=f"nifty_brief_{datetime.now().strftime('%Y%m%d')}.pdf",
-                                           mime="application/pdf")
+                with tab3:
+                    if r.get("explanation", {}).get("available"):
+                        st.markdown("**Top SHAP drivers:**")
+                        for i, reason in enumerate(r["explanation"]["reasons"][:5], 1):
+                            if isinstance(reason, dict):
+                                arrow = "🟢 ▲" if reason["shap"] > 0 else "🔴 ▼"
+                                st.markdown(f"`{i}. {reason['feature'][:28]:<28}` {arrow} strength **{reason['strength']:.4f}**")
                     else:
-                        st.info("Install `reportlab` to enable PDF: `pip install reportlab`")
+                        st.info("SHAP explanations not available for this prediction.")
 
-                    # ── Sentiment ──
-                    st.divider()
+                with tab4:
+                    render_voice_briefing(commentary)
+
+                with tab5:
                     render_sentiment()
 
-                    # ── Watchlist ──
-                    st.divider()
+                with tab6:
                     render_watchlist()
 
-                except Exception as e:
-                    st.error(f"Prediction failed: {e}")
-        else:
-            st.markdown("""<div class="placeholder">
-                <p class="placeholder-text">Click <strong>Generate Prediction</strong><br>to see today's market signal</p>
-            </div>""", unsafe_allow_html=True)
+                # ── PDF download ──────────────────────────────────────────────
+                pdf_bytes = generate_pdf_report(r, commentary)
+                if pdf_bytes:
+                    st.download_button(
+                        "📄 Download Morning Brief PDF",
+                        data      = pdf_bytes,
+                        file_name = f"nifty_brief_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime      = "application/pdf"
+                    )
 
-    with col_gauge:
-        st.markdown('<p class="sec-label">Confidence Meter</p>', unsafe_allow_html=True)
-        if st.session_state.get("last_result"):
-            r=st.session_state["last_result"]
-            fig=plot_confidence_gauge(r["confidence"],r["pred_int"])
+                # expiry / event warnings
+                if signal["is_expiry"]:
+                    st.warning("⚠️ Today is F&O expiry — expect elevated volatility.")
+                if signal["days_to_event"] <= 2:
+                    st.warning(f"⚠️ Major market event in {signal['days_to_event']} day(s) — signal reliability reduced.")
+
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
+
+    else:
+        st.markdown("""
+        <div style='background:rgba(15,23,42,.6);border:1.5px dashed rgba(99,179,237,.25);
+                    border-radius:16px;padding:4rem 2rem;text-align:center;margin-top:1rem;'>
+            <p style='font-family:Playfair Display,serif;font-size:2rem;font-weight:700;
+                      color:#334155;margin:0;'>Click ⚡ Generate Prediction</p>
+            <p style='font-family:IBM Plex Sans,sans-serif;font-size:1rem;
+                      color:#1e3a5f;margin:.5rem 0 0;'>to see today's market signal</p>
+        </div>""", unsafe_allow_html=True)
+
+    # ── Confidence gauge in sidebar ───────────────────────────────────────────
+    if st.session_state.get("last_result"):
+        with st.sidebar:
+            st.divider()
+            st.markdown('<p style="font-family:IBM Plex Mono,monospace;font-size:.72rem;color:#60a5fa;text-transform:uppercase;letter-spacing:.15em;">Confidence Meter</p>', unsafe_allow_html=True)
+            r = st.session_state["last_result"]
+            fig = plot_confidence_gauge(r["confidence"], r["pred_int"])
             st.pyplot(fig); plt.close()
-            st.markdown("""<div style='font-family:IBM Plex Mono,monospace;font-size:.72rem;color:#64748b;line-height:2.2;margin-top:.5rem;'>
-                <span style='color:#ef4444;'>█</span> 50–60% Weak<br>
-                <span style='color:#f97316;'>█</span> 60–75% Moderate<br>
-                <span style='color:#22c55e;'>█</span> 75%+ Strong</div>""", unsafe_allow_html=True)
-        else:
-            st.markdown("""<div class="placeholder" style='padding:2rem 1rem;'>
-                <p class="placeholder-text" style='font-size:.95rem;'>Gauge appears<br>after prediction</p>
-            </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: WHAT-IF SIMULATOR
