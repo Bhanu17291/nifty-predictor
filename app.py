@@ -497,6 +497,8 @@ st.markdown(f"""
     <div class="hero-rule"></div>
 </div>""", unsafe_allow_html=True)
 
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: LIVE PREDICTION
 # ══════════════════════════════════════════════════════════════════════════════
@@ -569,17 +571,15 @@ if "🏠" in page:
                 signal      = compute_signal(confidence=pred_confidence, vix=current_vix)
                 mag         = r.get("magnitude", {})
 
-                # ── helpers ──────────────────────────────────────────────────
                 def vc(v): return "up-val" if v > 0 else "down-val" if v < 0 else "neu-val"
                 def ar(v): return "▲" if v > 0 else "▼" if v < 0 else "—"
 
-                is_up       = r["pred_int"] == 1
-                sig_color   = "#22c55e" if is_up else "#ef4444"
-                sig_label   = "🟢 Bullish Open" if is_up else "🔴 Bearish Open"
-                sig_sub     = "Nifty expected to open HIGHER" if is_up else "Nifty expected to open LOWER"
-                conf_color  = "#22c55e" if pred_confidence >= .65 else "#f97316" if pred_confidence >= .55 else "#ef4444"
+                is_up      = r["pred_int"] == 1
+                sig_color  = "#22c55e" if is_up else "#ef4444"
+                sig_label  = "🟢 Bullish Open" if is_up else "🔴 Bearish Open"
+                sig_sub    = "Nifty expected to open HIGHER" if is_up else "Nifty expected to open LOWER"
+                conf_color = "#22c55e" if pred_confidence >= .65 else "#f97316" if pred_confidence >= .55 else "#ef4444"
 
-                # SHAP reasons
                 shap_top = []
                 if r.get("explanation", {}).get("available"):
                     for reason in r["explanation"].get("reasons", [])[:4]:
@@ -605,7 +605,6 @@ if "🏠" in page:
                         f"USD/INR moved {r.get('usdinr_ret',0):+.2f}%.",
                     ]
 
-                # target price strings
                 if mag.get("available"):
                     target_str = f"₹{mag['pred_price']:,.0f}"
                     range_str  = f"₹{mag['low_price']:,.0f} – ₹{mag['high_price']:,.0f}"
@@ -629,11 +628,9 @@ if "🏠" in page:
                         <span class="reason-text">{rt}</span>
                     </div>'''
 
-                # ── MAIN DASHBOARD GRID ───────────────────────────────────────
                 st.markdown(f"""
                 <div class="dashboard-grid">
 
-                  <!-- CARD 1: Signal -->
                   <div class="dash-card" style="border-top:3px solid {sig_color};">
                     <div class="card-label">Signal</div>
                     <p class="signal-big" style="color:{sig_color};">{sig_label}</p>
@@ -643,7 +640,6 @@ if "🏠" in page:
                                color:#475569;margin:.6rem 0 0;">📅 {r['as_of_date']}</p>
                   </div>
 
-                  <!-- CARD 2: Confidence -->
                   <div class="dash-card" style="border-top:3px solid {conf_color};">
                     <div class="card-label">Confidence</div>
                     <p class="conf-num" style="color:{conf_color};">{r['confidence']:.1f}%</p>
@@ -668,7 +664,6 @@ if "🏠" in page:
                     </div>
                   </div>
 
-                  <!-- CARD 3: Target Price -->
                   <div class="dash-card" style="border-top:3px solid #3b82f6;">
                     <div class="card-label">Target Open Price</div>
                     <p class="target-val">{target_str}
@@ -682,7 +677,6 @@ if "🏠" in page:
                     </div>
                   </div>
 
-                  <!-- CARD 4: Tickers (wide) -->
                   <div class="dash-card-wide" style="border-top:3px solid #1e3a8a;">
                     <div class="card-label">Market Signals</div>
                     <div class="ticker-mini">
@@ -700,13 +694,11 @@ if "🏠" in page:
                     </div>
                   </div>
 
-                  <!-- CARD 5: Why -->
                   <div class="dash-card" style="border-top:3px solid #7c3aed;">
                     <div class="card-label">Why This Prediction</div>
                     {reasons_html}
                   </div>
 
-                  <!-- CARD 6: Commentary (full width) -->
                   <div class="dash-card-full" style="border-top:3px solid #0891b2;">
                     <div class="card-label">🤖 AI Commentary</div>
                     <p class="commentary-mini">{commentary}</p>
@@ -715,7 +707,6 @@ if "🏠" in page:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # ── EXPANDABLE TABS for secondary content ─────────────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
                     "📊 Options", "📈 FII/DII", "🎯 SHAP Details",
@@ -763,7 +754,6 @@ if "🏠" in page:
                 with tab6:
                     render_watchlist()
 
-                # ── PDF download ──────────────────────────────────────────────
                 pdf_bytes = generate_pdf_report(r, commentary)
                 if pdf_bytes:
                     st.download_button(
@@ -773,7 +763,6 @@ if "🏠" in page:
                         mime      = "application/pdf"
                     )
 
-                # expiry / event warnings
                 if signal["is_expiry"]:
                     st.warning("⚠️ Today is F&O expiry — expect elevated volatility.")
                 if signal["days_to_event"] <= 2:
@@ -792,7 +781,6 @@ if "🏠" in page:
                       color:#1e3a5f;margin:.5rem 0 0;'>to see today's market signal</p>
         </div>""", unsafe_allow_html=True)
 
-    # ── Confidence gauge in sidebar ───────────────────────────────────────────
     if st.session_state.get("last_result"):
         with st.sidebar:
             st.divider()
@@ -800,7 +788,6 @@ if "🏠" in page:
             r = st.session_state["last_result"]
             fig = plot_confidence_gauge(r["confidence"], r["pred_int"])
             st.pyplot(fig); plt.close()
-
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: WHAT-IF SIMULATOR
 # ══════════════════════════════════════════════════════════════════════════════
