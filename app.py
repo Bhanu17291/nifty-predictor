@@ -489,14 +489,101 @@ with st.sidebar:
     </div>""", unsafe_allow_html=True)
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div class="hero">
-    <p class="hero-eyebrow">NSE · Nifty50 · {'Tier 3 · Ensemble' if USE_V2 else 'Tier 1'}</p>
-    <h1 class="hero-title">Nifty <span>Intelligence</span></h1>
-    <p class="hero-sub">Predictive analytics for the Indian equity market opening session</p>
-    <div class="hero-rule"></div>
-</div>""", unsafe_allow_html=True)
-
+st.markdown("""
+<style>
+@keyframes gradientShift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0);    }
+}
+@keyframes glowPulse {
+    0%, 100% { text-shadow: 0 0 20px rgba(96,165,250,.4), 0 0 40px rgba(59,130,246,.2); }
+    50%       { text-shadow: 0 0 40px rgba(96,165,250,.8), 0 0 80px rgba(59,130,246,.4); }
+}
+.hero-new {
+    background: linear-gradient(270deg, #0b0f1a, #1e3a8a, #1e40af, #0f172a, #0b0f1a);
+    background-size: 400% 400%;
+    animation: gradientShift 8s ease infinite;
+    border-radius: 0 0 28px 28px;
+    padding: 3.5rem 2rem 3rem;
+    text-align: center;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(99,179,237,.2);
+    position: relative;
+    overflow: hidden;
+}
+.hero-new::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at center,
+        rgba(59,130,246,.08) 0%,
+        transparent 60%);
+    animation: glowPulse 4s ease-in-out infinite;
+}
+.hero-new-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 4.5rem;
+    font-weight: 800;
+    color: #f1f5f9;
+    letter-spacing: -.04em;
+    line-height: 1.05;
+    margin: 0 0 .6rem;
+    animation: fadeInUp .8s ease both;
+}
+.hero-new-title span {
+    background: linear-gradient(135deg, #60a5fa, #93c5fd, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: glowPulse 3s ease-in-out infinite;
+}
+.hero-new-sub {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 1.15rem;
+    color: #94a3b8;
+    font-weight: 300;
+    margin: 0 0 1.4rem;
+    animation: fadeInUp .8s ease .2s both;
+}
+.hero-new-badges {
+    display: flex;
+    gap: .6rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    animation: fadeInUp .8s ease .4s both;
+}
+.hero-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .72rem;
+    font-weight: 600;
+    padding: .3rem .9rem;
+    border-radius: 20px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    background: rgba(59,130,246,.15);
+    border: 1px solid rgba(99,179,237,.3);
+    color: #93c5fd;
+}
+</style>
+<div class="hero-new">
+    <h1 class="hero-new-title">Nifty <span>Intelligence</span></h1>
+    <p class="hero-new-sub">Predictive analytics for the Indian equity market opening session</p>
+    <div class="hero-new-badges">
+        <span class="hero-badge">📈 NSE · Nifty50</span>
+        <span class="hero-badge">🤖 Ensemble AI</span>
+        <span class="hero-badge">⚡ Live Signals</span>
+        <span class="hero-badge">🎯 Tier 3 Model</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
